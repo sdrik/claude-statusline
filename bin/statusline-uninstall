@@ -1,0 +1,44 @@
+#!/bin/bash
+# Remove the statusline from the user's Claude Code settings.
+#
+# Invoked as a bare command name (this plugin's bin/ is on the Bash tool PATH).
+#
+# - Drops the `statusLine` entry from ~/.claude/settings.json (all other settings kept).
+# - Deletes the installed renderer only if it is byte-identical to the shipped one,
+#   so a customised script is never removed.
+set -euo pipefail
+
+if ! command -v jq >/dev/null 2>&1; then
+  echo "error: jq is required but was not found." >&2
+  exit 1
+fi
+
+PLUGIN_ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
+SRC="$PLUGIN_ROOT/scripts/statusline-command.sh"
+CLAUDE_DIR="$HOME/.claude"
+DEST="$CLAUDE_DIR/statusline-command.sh"
+SETTINGS="$CLAUDE_DIR/settings.json"
+
+# Drop the statusLine entry (leave every other setting intact).
+if [ -f "$SETTINGS" ]; then
+  tmp=$(mktemp "$CLAUDE_DIR/.settings.json.XXXXXX")
+  trap 'rm -f "$tmp"' EXIT
+  jq 'del(.statusLine)' "$SETTINGS" > "$tmp"
+  mv "$tmp" "$SETTINGS"
+  trap - EXIT
+  echo "Removed statusLine entry from $SETTINGS."
+else
+  echo "No settings file at $SETTINGS; nothing to change."
+fi
+
+# Remove the installed renderer only if it is the one we shipped.
+if [ -f "$DEST" ]; then
+  if [ -f "$SRC" ] && cmp -s "$SRC" "$DEST"; then
+    rm -f "$DEST"
+    echo "Removed installed renderer $DEST."
+  else
+    echo "Left $DEST in place (it differs from the shipped script, or the source is unavailable)."
+  fi
+fi
+
+echo "Done. The status line will disappear on the next status refresh."

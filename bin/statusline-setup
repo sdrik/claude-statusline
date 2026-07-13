@@ -1,0 +1,54 @@
+#!/bin/bash
+# Install the statusline into the user's Claude Code settings.
+#
+# Invoked as a bare command name: Claude Code adds each enabled plugin's bin/ to
+# the Bash tool's PATH. The bundled renderer is located relative to this script
+# (${CLAUDE_PLUGIN_ROOT} is NOT available in command markdown or the Bash env).
+#
+# - Copies the bundled renderer to a stable path (~/.claude/statusline-command.sh)
+#   so it keeps working across plugin updates (the plugin's own directory is a
+#   versioned cache path that changes on every update).
+# - Merges a `statusLine` entry into ~/.claude/settings.json with jq, leaving every
+#   other setting untouched.
+set -euo pipefail
+
+# jq is required both here and by the renderer itself.
+if ! command -v jq >/dev/null 2>&1; then
+  echo "error: jq is required but was not found." >&2
+  echo "       Install jq (e.g. 'sudo pacman -S jq', 'brew install jq', 'apt install jq') and run /statusline:setup again." >&2
+  exit 1
+fi
+
+PLUGIN_ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
+SRC="$PLUGIN_ROOT/scripts/statusline-command.sh"
+if [ ! -f "$SRC" ]; then
+  echo "error: bundled statusline-command.sh not found at $SRC" >&2
+  exit 1
+fi
+
+CLAUDE_DIR="$HOME/.claude"
+DEST="$CLAUDE_DIR/statusline-command.sh"
+SETTINGS="$CLAUDE_DIR/settings.json"
+
+mkdir -p "$CLAUDE_DIR"
+
+# Back up an existing, DIFFERENT script once (never silently clobber a custom one).
+if [ -f "$DEST" ] && ! cmp -s "$SRC" "$DEST" && [ ! -f "$DEST.pre-statusline-plugin.bak" ]; then
+  cp "$DEST" "$DEST.pre-statusline-plugin.bak"
+  echo "Backed up existing statusline script -> $DEST.pre-statusline-plugin.bak"
+fi
+cp "$SRC" "$DEST"
+echo "Installed statusline renderer -> $DEST"
+
+# Merge the statusLine entry into settings.json, preserving all other keys.
+# $HOME stays literal here; it is expanded by the shell that runs the command.
+[ -f "$SETTINGS" ] || echo '{}' > "$SETTINGS"
+tmp=$(mktemp "$CLAUDE_DIR/.settings.json.XXXXXX")
+trap 'rm -f "$tmp"' EXIT
+jq '.statusLine = {"type": "command", "command": "bash \"$HOME/.claude/statusline-command.sh\""}' \
+  "$SETTINGS" > "$tmp"
+mv "$tmp" "$SETTINGS"
+trap - EXIT
+echo "Updated $SETTINGS (statusLine entry set)."
+
+echo "Done. The status line will appear on the next status refresh."
