@@ -1,0 +1,73 @@
+#!/bin/bash
+# Report where the status line is installed and whether it is up to date.
+#
+# Diagnostic only: it cannot install anything. ${CLAUDE_PLUGIN_DATA} exists only
+# in hook environments, so a command invoked from the Bash tool has no way to
+# resolve the destination — which is why the install hook publishes the pointer
+# this script reads. Installation happens on its own at the next session start.
+set -euo pipefail
+
+if ! command -v jq >/dev/null 2>&1; then
+  echo "error: jq is required but was not found." >&2
+  exit 1
+fi
+
+CLAUDE_DIR="$HOME/.claude"
+POINTER="$CLAUDE_DIR/statusline-plugin.json"
+SETTINGS="$CLAUDE_DIR/settings.json"
+
+if [ ! -f "$POINTER" ]; then
+  echo "Status line not installed yet."
+  echo "  The install hook runs at session start; no run has completed since the"
+  echo "  plugin was enabled. Start a new session and it will install itself."
+  exit 0
+fi
+
+# Every jq below tolerates its own failure: a diagnostic that dies on a file it
+# was written to diagnose is worse than useless. `set -e` would otherwise abort
+# the whole report on an unparseable file — including the branches that exist
+# precisely to report one.
+dest=$(jq -r '.dest // empty' "$POINTER" 2>/dev/null || true)
+shipped=$(jq -r '.version // empty' "$POINTER" 2>/dev/null || true)
+echo "Renderer:        ${dest:-<unknown>}"
+echo "Shipped version: ${shipped:-<unknown>}"
+
+if [ -z "$dest" ]; then
+  echo "  The pointer is unreadable. It is rewritten at the next session start."
+  exit 0
+fi
+
+if [ -f "$dest" ]; then
+  installed=$(sed -n "s/^VERSION='\(.*\)'$/\1/p" "$dest" 2>/dev/null | head -n1 || true)
+  echo "Installed:       ${installed:-<unknown>}"
+  if [ -n "$installed" ] && [ -n "$shipped" ] && [ "$installed" != "$shipped" ]; then
+    echo "  STALE: the last copy failed, so the status line is showing ⚠."
+    echo "  The hook retries at every session start; if it keeps failing, check"
+    echo "  that $(dirname "$dest") is writable."
+  fi
+else
+  echo "Installed:       missing"
+  echo "  The renderer is gone (uninstalling the plugin deletes its data"
+  echo "  directory). The status line shows a notice instead of going blank."
+fi
+
+# Whether the user's settings actually point at it. A foreign entry is never
+# overwritten by the hook, so saying so is the only way the user learns why
+# their status line is not the one this plugin installed.
+if [ -f "$SETTINGS" ]; then
+  if ! current=$(jq -r '.statusLine.command // empty' "$SETTINGS" 2>/dev/null); then
+    echo "settings.json:   unreadable — it does not parse as JSON, so the hook"
+    echo "                 cannot write to it either; fix or remove the file"
+    exit 0
+  fi
+  if [ -z "$current" ]; then
+    echo "settings.json:   no statusLine entry (it is written at session start)"
+  elif printf '%s' "$current" | grep -qF -- "$dest"; then
+    echo "settings.json:   wired to this renderer"
+  else
+    echo "settings.json:   wired to something else — left untouched on purpose:"
+    echo "                 $current"
+  fi
+else
+  echo "settings.json:   absent (it is created at session start)"
+fi

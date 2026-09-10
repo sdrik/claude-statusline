@@ -31,19 +31,75 @@ Works on Linux (GNU) and macOS/BSD.
 
 ## Usage
 
-Once the plugin is enabled:
+Enabling the plugin is all there is to it. The status line installs itself at
+the start of your next session and keeps itself up to date from then on; there
+is no setup command to run.
 
-- `/statusline:setup` — installs the status line. It copies the renderer to
-  `~/.claude/statusline-command.sh` and adds a `statusLine` entry to
-  `~/.claude/settings.json`; all your other settings are preserved. If a
-  *different* script already exists at that path, it is backed up once to
-  `~/.claude/statusline-command.sh.pre-statusline-plugin.bak`.
-- `/statusline:uninstall` — removes the `statusLine` entry from your settings and
-  deletes the installed renderer (only when it is unchanged from the shipped one;
-  a customised script is left in place).
+- `/statusline:status` — reports where the renderer is, which version is
+  installed, whether your settings point at it, and whether it is stale. It only
+  reports; it cannot install.
 
-The status line refreshes after each assistant message, so it appears or
-disappears on the next refresh.
+The status line refreshes after each assistant message, so it appears on the
+next refresh once a session has started.
+
+### What it writes, and when
+
+**On every session start, unprompted and with your full privileges**, a
+`SessionStart` hook:
+
+1. copies the renderer into the plugin's own data directory
+   (`~/.claude/plugins/data/statusline-<marketplace>/`);
+2. adds a `statusLine` entry to `~/.claude/settings.json`, leaving every other
+   setting untouched — **but only** if there is no `statusLine` entry, or the one
+   there is provably the plugin's own (see below);
+3. writes a pointer file, `~/.claude/statusline-plugin.json`, so
+   `/statusline:status` can find the rest.
+
+Hooks run without a sandbox and without a permission prompt — that is the
+documented norm for every Claude Code plugin hook, not something special here.
+It is stated plainly because it is a real change from earlier versions, which
+only ever wrote when you ran `/statusline:setup`. Reading `hooks/sync.sh` before
+you enable the plugin is the intended way to check that claim.
+
+"Provably its own" means one of two things: the entry already names the current
+destination, or it names the pre-2.0.0 path (`~/.claude/statusline-command.sh`)
+*and* the file there is byte-for-byte a renderer this plugin shipped. Any other
+`statusLine` value is left alone permanently. A renderer you took over and
+edited yourself is therefore safe — and so is the
+`statusline-command.sh.pre-statusline-plugin.bak` that the old installer may
+have left in your `~/.claude`, which is never touched.
+
+### Upgrading from 1.x
+
+Nothing to do. The first session after the update recognises the old install by
+its hash, repoints `settings.json` at the new location, and deletes the orphaned
+`~/.claude/statusline-command.sh`. If the file there is *not* one this plugin
+shipped, nothing is moved and nothing is deleted.
+
+### Turning it off
+
+- **No status line at all:** disable or uninstall the plugin. Uninstalling
+  deletes the plugin's data directory, so the renderer goes with it; the
+  `statusLine` entry left behind in your settings prints a short notice telling
+  you to remove it, rather than leaving the line silently blank.
+- **Keep the plugin, no status line:** set `statusLine` to `{"type": "command",
+  "command": "true"}` yourself. The hook sees an entry it cannot prove is its
+  own and never touches it again.
+
+### Customising the renderer
+
+Editing the installed renderer is not a supported path — it is overwritten on
+every update, by design, and its location says so. The supported ways to change
+behaviour are the [`STATUSLINE_*` environment variables](#tuning) and, for
+anything deeper, copying the renderer somewhere of your own and pointing
+`statusLine` at your copy. The hook will then leave your entry alone.
+
+### When something goes wrong
+
+If the copy fails, the status line shows `⚠ /statusline:status` as its first
+segment. That badge exists because the hook has no other channel: its output
+would be injected into the model's context, so it stays silent and lets the
+status line speak. Run `/statusline:status` for the detail.
 
 ## Session degradation
 
@@ -138,15 +194,59 @@ expected rather than exceptional.
 
 ## Development
 
-`bash tests/render.test.sh` feeds synthetic payloads to the renderer and asserts
-on the escape sequences it emits. No dependencies beyond the ones the renderer
-itself needs.
+Two suites, no dependencies beyond the ones the renderer itself needs:
+
+- `bash tests/render.test.sh` — feeds synthetic payloads to the renderer and
+  asserts on the escape sequences it emits.
+- `bash tests/hook.test.sh` — runs the install hook in a throwaway `$HOME` with
+  a fake plugin root and data directory, and asserts on what it wrote. Every
+  branch that decides *whether* to write to `settings.json` is covered there,
+  which is what justifies letting a hook write to `$HOME` at all.
+
+Loading a checkout with `--plugin-dir` is the supported development mode, and
+the hook detects it: a checkout loaded that way gets a data directory named
+`statusline-inline` rather than `statusline-<marketplace>`, and the hook bails
+out on sight of it. Without that guard a checkout and a marketplace install
+would resolve two different destinations and rewrite `settings.json` against
+each other at every session start, leaving the status line alternating between
+two renderers.
+
+So `--plugin-dir` alone will not install anything. Point your settings at the
+checkout directly instead. `.claude/settings.local.json` is gitignored, so it is
+not in a fresh clone — create it with exactly this:
+
+```json
+{
+  "statusLine": {
+    "type": "command",
+    "command": "bash \"$CLAUDE_PROJECT_DIR/scripts/statusline-command.sh\""
+  }
+}
+```
+
+Project settings win over user settings, and Claude Code reloads settings files
+live, so an edit to the renderer shows up at the next refresh with no restart.
+Running the renderer straight from the checkout leaves the `@@VERSION@@`
+placeholder unsubstituted, which is harmless: with no witness file beside it,
+the staleness badge has nothing to compare against and stays silent.
 
 ## How it works
 
-Claude Code plugins can't set the main status line declaratively (a plugin's own
-`settings.json` only honours the `agent` and `subagentStatusLine` keys). So this
-plugin ships the renderer script plus a small installer that writes the
-`statusLine` entry into your user settings — the same approach the built-in
-`/statusline` command uses. The renderer is copied to a stable path so it keeps
-working across plugin updates.
+Claude Code plugins can't set the main status line declaratively — `statusLine`
+is a user-only setting, with no plugin manifest key and no settings-merge
+mechanism that could contribute one. So the plugin ships the renderer and
+installs it into your user settings itself, the same way the built-in
+`/statusline` command does.
+
+The installation is driven by a `SessionStart` hook rather than by a command,
+and that is forced by one fact: the destination lives under
+`${CLAUDE_PLUGIN_DATA}`, and that variable exists **only** in hook
+environments — it is absent from the environment of the Bash tool, so no
+command a user can invoke is able to resolve it.
+
+Earlier versions dodged this by copying the renderer to a fixed path from a
+`/statusline:setup` command. The cost was that a plugin update had no effect
+until you remembered to re-run that command, and nothing told you: the status
+line just kept rendering old code indefinitely. Driving it from a hook removes
+the manual step, and the version witness makes the remaining failure mode — a
+copy that could not be written — visible instead of silent.

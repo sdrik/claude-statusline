@@ -1,0 +1,324 @@
+#!/bin/bash
+# Install-hook tests: run the hook in a throwaway HOME and assert on what it
+# wrote. Run: bash tests/hook.test.sh
+#
+# The hook writes to $HOME and to the user's settings.json on every session
+# start, unprompted and with full privileges. That blast radius is what these
+# cases pay for: every branch that decides *whether* to write is covered here.
+
+ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+HOOK="$ROOT/hooks/sync.sh"
+# The renderer we shipped in 1.0.0 (commit bcabb0a). The hook trusts this hash
+# to recognise its own past installations; the test reproduces the file from
+# git so the constant is checked against the real artefact, not against itself.
+LEGACY_SHA=b0a607d99dec6cc61cf4286fb6cd4ee318949ab84dc74a81c3dc5159439b52b4
+pass=0
+fail=0
+temps=()
+
+# Some cases chmod directories to unwritable on purpose, so restore the bits
+# before removing the trees.
+cleanup() {
+  local t
+  for t in "${temps[@]}"; do
+    chmod -R u+rwX "$t" 2>/dev/null
+    rm -rf "$t"
+  done
+}
+trap cleanup EXIT
+
+eq() {
+  local label="$1" got="$2" want="$3"
+  if [ "$got" = "$want" ]; then
+    pass=$((pass + 1))
+  else
+    fail=$((fail + 1))
+    printf 'FAIL %s\n  attendu : %s\n  obtenu  : %s\n' "$label" "$want" "$got"
+  fi
+}
+
+ok() {
+  local label="$1" haystack="$2" needle="$3"
+  if printf '%s' "$haystack" | grep -qF -- "$needle"; then
+    pass=$((pass + 1))
+  else
+    fail=$((fail + 1))
+    printf 'FAIL %s\n  attendu (present) : %q\n  sortie            : %q\n' "$label" "$needle" "$haystack"
+  fi
+}
+
+no() {
+  local label="$1" haystack="$2" needle="$3"
+  if printf '%s' "$haystack" | grep -qF -- "$needle"; then
+    fail=$((fail + 1))
+    printf 'FAIL %s\n  attendu (absent) : %q\n  sortie           : %q\n' "$label" "$needle" "$haystack"
+  else
+    pass=$((pass + 1))
+  fi
+}
+
+yes_file() {
+  local label="$1" path="$2"
+  if [ -e "$path" ]; then pass=$((pass + 1)); else
+    fail=$((fail + 1)); printf 'FAIL %s\n  fichier attendu absent : %s\n' "$label" "$path"
+  fi
+}
+
+no_file() {
+  local label="$1" path="$2"
+  if [ -e "$path" ]; then
+    fail=$((fail + 1)); printf 'FAIL %s\n  fichier devait disparaitre : %s\n' "$label" "$path"
+  else pass=$((pass + 1)); fi
+}
+
+# env_new [version] [data_dir_id] -> a fresh throwaway plugin install.
+# Exports the three variables the hook reads. CLAUDE_PLUGIN_ROOT gets a real
+# copy of the shipped renderer, because the version injection is asserted on it.
+env_new() {
+  local ver="${1:-2.0.0}" id="${2:-statusline-sdrik-plugins}" tmp
+  tmp=$(mktemp -d)
+  temps+=("$tmp")
+  export HOME="$tmp/home"
+  export CLAUDE_PLUGIN_ROOT="$tmp/root"
+  export CLAUDE_PLUGIN_DATA="$tmp/data/$id"
+  mkdir -p "$HOME/.claude" "$CLAUDE_PLUGIN_ROOT/.claude-plugin" "$CLAUDE_PLUGIN_ROOT/scripts"
+  cp "$ROOT/scripts/statusline-command.sh" "$CLAUDE_PLUGIN_ROOT/scripts/"
+  printf '{"name":"statusline","version":"%s"}\n' "$ver" \
+    > "$CLAUDE_PLUGIN_ROOT/.claude-plugin/plugin.json"
+  SETTINGS="$HOME/.claude/settings.json"
+  LEGACY="$HOME/.claude/statusline-command.sh"
+  DEST="$CLAUDE_PLUGIN_DATA/statusline-command.sh"
+  WITNESS="$CLAUDE_PLUGIN_DATA/statusline-witness"
+  POINTER="$HOME/.claude/statusline-plugin.json"
+}
+
+run_hook() { bash "$HOOK" 2>/dev/null; }
+
+# The status line payload is irrelevant to the badge, and a bare {} keeps every
+# other segment out of the way (the throwaway HOME has no .claude.json either).
+render_installed() { printf '{}' | bash "$DEST" 2>/dev/null; }
+
+sl_command() { jq -r '.statusLine.command // empty' "$SETTINGS" 2>/dev/null; }
+
+# --- installation neuve -------------------------------------------------------
+
+env_new 2.0.0
+run_hook
+
+yes_file "install neuve : le renderer est copie" "$DEST"
+yes_file "install neuve : le temoin est ecrit" "$WITNESS"
+yes_file "install neuve : le pointeur est publie" "$POINTER"
+eq "install neuve : le temoin porte la version livree" "$(cat "$WITNESS")" "2.0.0"
+ok "install neuve : la version est injectee dans la copie" "$(grep -m1 '^VERSION=' "$DEST")" "VERSION='2.0.0'"
+no "install neuve : le placeholder ne survit pas" "$(cat "$DEST")" "@@VERSION@@"
+ok "install neuve : settings.json pointe sur le dest" "$(sl_command)" "$DEST"
+ok "install neuve : la commande est gardee" "$(sl_command)" "renderer absent"
+eq "install neuve : le pointeur donne le dest" "$(jq -r .dest "$POINTER")" "$DEST"
+eq "install neuve : le pointeur donne la version" "$(jq -r .version "$POINTER")" "2.0.0"
+no "install neuve : pas de badge" "$(render_installed)" "⚠"
+
+# Les autres reglages de l'utilisateur survivent a l'ecriture.
+env_new 2.0.0
+printf '{"theme":"dark","permissions":{"allow":["Bash(ls)"]}}\n' > "$SETTINGS"
+run_hook
+eq "install neuve : les autres reglages sont preserves" "$(jq -r .theme "$SETTINGS")" "dark"
+eq "install neuve : les permissions sont preservees" "$(jq -r '.permissions.allow[0]' "$SETTINGS")" "Bash(ls)"
+
+# --- statusLine etranger : on ne touche a rien --------------------------------
+
+env_new 2.0.0
+printf '{"statusLine":{"type":"command","command":"bash /opt/moi/ma-statusline.sh"}}\n' > "$SETTINGS"
+run_hook
+eq "statusLine etranger : intouche" "$(sl_command)" "bash /opt/moi/ma-statusline.sh"
+yes_file "statusLine etranger : le renderer est copie quand meme" "$DEST"
+
+# `true` est la porte de sortie documentee pour garder le plugin sans statusline.
+env_new 2.0.0
+printf '{"statusLine":{"type":"command","command":"true"}}\n' > "$SETTINGS"
+run_hook
+eq "opt-out par 'true' : respecte" "$(sl_command)" "true"
+
+# --- migration depuis l'ancien chemin ----------------------------------------
+
+if ! git -C "$ROOT" show bcabb0a:scripts/statusline-command.sh > /dev/null 2>&1; then
+  printf 'FAIL migration : impossible de reproduire le renderer 1.0.0 depuis git\n'
+  fail=$((fail + 1))
+else
+  env_new 2.0.0
+  git -C "$ROOT" show bcabb0a:scripts/statusline-command.sh > "$LEGACY"
+  eq "le renderer 1.0.0 reproduit a bien le hash attendu" \
+    "$(sha256sum < "$LEGACY" | cut -d' ' -f1)" "$LEGACY_SHA"
+  # Forme exacte ecrite par l'ancien installeur : $HOME reste litteral.
+  jq -n '{statusLine:{type:"command",command:"bash \"$HOME/.claude/statusline-command.sh\""}}' \
+    > "$SETTINGS"
+  BAK="$LEGACY.pre-statusline-plugin.bak"
+  printf '#!/bin/bash\n# le script personnel de quelqu un\n' > "$BAK"
+  run_hook
+  ok "migration : settings.json repointe sur le dest" "$(sl_command)" "$DEST"
+  no_file "migration : l'ancien renderer est supprime" "$LEGACY"
+  yes_file "migration : le .bak n'est jamais touche" "$BAK"
+  eq "migration : le .bak est intact" "$(sed -n 2p "$BAK")" "# le script personnel de quelqu un"
+
+  # Un statusLine qui vise le .bak n'est pas le notre, meme si l'ancien chemin
+  # dont il derive porte, lui, un renderer que nous avons livre.
+  env_new 2.0.0
+  git -C "$ROOT" show bcabb0a:scripts/statusline-command.sh > "$LEGACY"
+  BAK="$LEGACY.pre-statusline-plugin.bak"
+  printf '#!/bin/bash\nprintf maison\n' > "$BAK"
+  jq -n '{statusLine:{type:"command",command:"bash \"$HOME/.claude/statusline-command.sh.pre-statusline-plugin.bak\""}}' \
+    > "$SETTINGS"
+  run_hook
+  ok "statusLine vise le .bak : intouche" "$(sl_command)" ".pre-statusline-plugin.bak"
+  yes_file "statusLine vise le .bak : rien n'est supprime" "$LEGACY"
+  yes_file "statusLine vise le .bak : le .bak survit" "$BAK"
+
+  # Hash inconnu = fichier de quelqu'un d'autre : ni repointage, ni suppression.
+  env_new 2.0.0
+  printf '#!/bin/bash\n# ma statusline maison\nprintf coucou\n' > "$LEGACY"
+  jq -n '{statusLine:{type:"command",command:"bash \"$HOME/.claude/statusline-command.sh\""}}' \
+    > "$SETTINGS"
+  run_hook
+  eq "hash inconnu : settings.json intouche" "$(sl_command)" 'bash "$HOME/.claude/statusline-command.sh"'
+  yes_file "hash inconnu : l'ancien fichier est conserve" "$LEGACY"
+fi
+
+# --- chargement inline : le hook ne fait rien --------------------------------
+
+env_new 2.0.0 statusline-inline
+run_hook
+no_file "inline : aucun renderer installe" "$DEST"
+no_file "inline : aucun temoin" "$WITNESS"
+no_file "inline : aucun pointeur" "$POINTER"
+no_file "inline : settings.json pas cree" "$SETTINGS"
+
+# --- echec de copie => badge --------------------------------------------------
+
+# Le temoin est ecrit AVANT la tentative de copie : c'est ce qui rend l'echec
+# detectable. On installe donc une version, puis on casse la source et on
+# remonte la version livree — le renderer reste a l'ancienne, le temoin passe a
+# la nouvelle, et le badge doit apparaitre.
+env_new 1.9.0
+run_hook
+eq "avant l'echec : renderer en 1.9.0" "$(grep -m1 '^VERSION=' "$DEST")" "VERSION='1.9.0'"
+no "avant l'echec : pas de badge" "$(render_installed)" "⚠"
+
+printf '{"name":"statusline","version":"2.0.0"}\n' > "$CLAUDE_PLUGIN_ROOT/.claude-plugin/plugin.json"
+chmod 000 "$CLAUDE_PLUGIN_ROOT/scripts/statusline-command.sh"
+if [ -r "$CLAUDE_PLUGIN_ROOT/scripts/statusline-command.sh" ]; then
+  printf 'SKIP echec de copie : la source reste lisible (execution privilegiee ?)\n'
+else
+  run_hook
+  eq "echec de copie : le temoin passe a la version livree" "$(cat "$WITNESS")" "2.0.0"
+  eq "echec de copie : le renderer reste a l'ancienne version" \
+    "$(grep -m1 '^VERSION=' "$DEST")" "VERSION='1.9.0'"
+  ok "echec de copie : le badge apparait" "$(render_installed)" "⚠"
+  # Le badge doit etre le premier segment : un terminal tronque par la droite.
+  eq "echec de copie : le badge est en tete" \
+    "$(render_installed | sed 's/\x1b\[[0-9;]*m//g' | cut -c1-3)" "⚠"
+fi
+chmod 644 "$CLAUDE_PLUGIN_ROOT/scripts/statusline-command.sh"
+
+# Un echec de copie sur une install NEUVE ne doit pas cabler settings.json vers
+# un fichier absent : mieux vaut pas de statusline qu'une statusline muette.
+env_new 2.0.0
+chmod 000 "$CLAUDE_PLUGIN_ROOT/scripts/statusline-command.sh"
+if [ ! -r "$CLAUDE_PLUGIN_ROOT/scripts/statusline-command.sh" ]; then
+  run_hook
+  no_file "echec sur install neuve : le renderer est absent" "$DEST"
+  eq "echec sur install neuve : settings.json non cable" "$(sl_command)" ""
+fi
+chmod 644 "$CLAUDE_PLUGIN_ROOT/scripts/statusline-command.sh"
+
+# Et il ne doit pas casser une migration en cours : l'ancien renderer marche.
+if git -C "$ROOT" show bcabb0a:scripts/statusline-command.sh > /dev/null 2>&1; then
+  env_new 2.0.0
+  git -C "$ROOT" show bcabb0a:scripts/statusline-command.sh > "$LEGACY"
+  jq -n '{statusLine:{type:"command",command:"bash \"$HOME/.claude/statusline-command.sh\""}}' \
+    > "$SETTINGS"
+  chmod 000 "$CLAUDE_PLUGIN_ROOT/scripts/statusline-command.sh"
+  if [ ! -r "$CLAUDE_PLUGIN_ROOT/scripts/statusline-command.sh" ]; then
+    run_hook
+    yes_file "echec pendant migration : l'ancien renderer est conserve" "$LEGACY"
+    eq "echec pendant migration : settings.json reste sur l'ancien" \
+      "$(sl_command)" 'bash "$HOME/.claude/statusline-command.sh"'
+  fi
+  chmod 644 "$CLAUDE_PLUGIN_ROOT/scripts/statusline-command.sh"
+fi
+
+# Si l'ecriture de settings.json echoue, l'ancien renderer NE DOIT PAS etre
+# supprime : l'entree le designe encore, et le supprimer ferait tomber une
+# statusline qui marche vers un vide muet.
+if git -C "$ROOT" show bcabb0a:scripts/statusline-command.sh > /dev/null 2>&1; then
+  env_new 2.0.0
+  git -C "$ROOT" show bcabb0a:scripts/statusline-command.sh > "$LEGACY"
+  jq -n '{statusLine:{type:"command",command:"bash \"$HOME/.claude/statusline-command.sh\""}}' \
+    > "$SETTINGS"
+  chmod 500 "$HOME/.claude"   # lecture possible, ecriture non
+  if ! ( : > "$HOME/.claude/.probe" ) 2>/dev/null; then
+    run_hook
+    yes_file "settings.json non ecrit : l'ancien renderer survit" "$LEGACY"
+  else
+    rm -f "$HOME/.claude/.probe"
+    printf 'SKIP ecriture impossible non simulable (execution privilegiee ?)\n'
+  fi
+  chmod 700 "$HOME/.claude"
+fi
+
+# --- temoin absent => pas de badge -------------------------------------------
+
+# Cas de la session de migration elle-meme : le renderer tourne depuis un
+# emplacement sans temoin, il ne peut rien affirmer sur sa fraicheur.
+env_new 2.0.0
+run_hook
+rm -f "$WITNESS"
+no "temoin absent : pas de badge" "$(render_installed)" "⚠"
+
+# Un temoin vide n'est pas une preuve de peremption non plus.
+env_new 2.0.0
+run_hook
+: > "$WITNESS"
+no "temoin vide : pas de badge" "$(render_installed)" "⚠"
+
+# --- idempotence --------------------------------------------------------------
+
+env_new 2.0.0
+run_hook
+first=$(sl_command)
+inode=$(ls -i "$SETTINGS" | awk '{print $1}')
+run_hook
+eq "deux executions : settings.json stable" "$(sl_command)" "$first"
+no "deux executions : pas de badge" "$(render_installed)" "⚠"
+# L'ecriture passe par mktemp + mv : un inode inchange prouve qu'on n'a pas
+# reecrit le fichier de l'utilisateur pour rien a chaque demarrage de session.
+eq "deux executions : settings.json pas reecrit" "$(ls -i "$SETTINGS" | awk '{print $1}')" "$inode"
+
+# --- le dossier de donnees a bouge -------------------------------------------
+
+# CLAUDE_PLUGIN_DATA porte le nom de la marketplace : la reinstaller depuis une
+# autre deplace la destination. L'entree qu'on a ecrite nous-memes doit rester
+# reconnaissable, sinon la statusline reste bloquee pour de bon sur l'avis
+# "renderer absent".
+env_new 2.0.0 statusline-marche-a
+run_hook
+moved=$(sl_command)
+export CLAUDE_PLUGIN_DATA="${CLAUDE_PLUGIN_DATA%-a}-b"
+DEST="$CLAUDE_PLUGIN_DATA/statusline-command.sh"
+run_hook
+ok "dest deplace : settings.json repointe" "$(sl_command)" "$DEST"
+no "dest deplace : l'ancien dest a disparu de l'entree" "$(sl_command)" "$moved"
+yes_file "dest deplace : le renderer est installe au nouvel endroit" "$DEST"
+
+# --- silence ------------------------------------------------------------------
+
+# Le stdout d'un hook SessionStart est injecte dans le contexte du modele : le
+# cas nominal doit etre muet.
+env_new 2.0.0
+out=$(bash "$HOOK" 2>/dev/null)
+eq "cas nominal : rien sur stdout" "$out" ""
+
+env_new 2.0.0 statusline-inline
+out=$(bash "$HOOK" 2>/dev/null)
+eq "inline : rien sur stdout" "$out" ""
+
+printf '\n%d passes, %d echecs\n' "$pass" "$fail"
+[ "$fail" -eq 0 ]

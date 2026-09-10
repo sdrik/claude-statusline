@@ -4,22 +4,31 @@
 
 command -v jq >/dev/null 2>&1 || exit 0
 
+# Injected by the install hook when it copies this file; the shipped copy keeps
+# the placeholder. plugin.json is therefore the single source of truth for the
+# version, with no hand-maintained constant able to drift out of step with it
+# and make the staleness badge lie. A dev checkout runs with the placeholder
+# intact, which is harmless: there is no witness beside it to compare against.
+VERSION='@@VERSION@@'
+
+# A non-numeric override would otherwise mis-scale the gauge and spam stderr on
+# every refresh. Dropping it here rather than after the assignments below keeps
+# each default written exactly once, where it cannot drift out of step with a
+# copy in a validation table.
+for _v in STATUSLINE_CTX_WARN STATUSLINE_CTX_CRIT STATUSLINE_TURNS_MIN STATUSLINE_TURNS_MAX; do
+  case ${!_v:-} in
+    '') ;;
+    *[!0-9]*) unset "$_v" ;;
+  esac
+done
+unset _v
+
 # Degradation anchors. These are product choices, not research results —
 # see the "Session degradation" section of the README before changing them.
 CTX_WARN=${STATUSLINE_CTX_WARN:-100000}   # tokens: gauge turns yellow
 CTX_CRIT=${STATUSLINE_CTX_CRIT:-200000}   # tokens: gauge turns red, and full scale
 TURNS_LO=${STATUSLINE_TURNS_MIN:-30}      # loop turns: below this the counter stays green
 TURNS_HI=${STATUSLINE_TURNS_MAX:-250}     # loop turns: at or above this it saturates red
-
-# A non-numeric override would otherwise mis-scale the gauge and spam stderr on
-# every refresh, so fall back to the default instead of trusting the value.
-for _v in CTX_WARN:100000 CTX_CRIT:200000 TURNS_LO:30 TURNS_HI:250; do
-  _name=${_v%%:*}
-  case ${!_name} in
-    '' | *[!0-9]*) eval "$_name=${_v##*:}" ;;
-  esac
-done
-unset _v _name
 
 input="$(cat)"
 
@@ -35,10 +44,31 @@ C_EFFORT=$'\033[33m'  # yellow
 C_CTX_LO=$'\033[32m'  # green
 C_CTX_MID=$'\033[33m' # yellow
 C_CTX_HI=$'\033[31m'  # red
+C_STALE=$'\033[31m'   # red
 
 SEP="${C_DIM} │ ${C_RESET}"
 
 segments=()
+
+# 0. Staleness badge. The install hook writes the witness with the version it
+# ships BEFORE it attempts the copy, so a witness ahead of the VERSION baked
+# into this file is proof the copy failed — the one failure the hook has no
+# other way to report, since its stdout would land in the model's context.
+#
+# First segment on purpose: a terminal truncates the right-hand end, and this is
+# the one thing that must never be the part that gets cut.
+#
+# No witness means no claim about freshness, so stay silent: that is a dev
+# checkout, or the session that is migrating a pre-2.0.0 install and is still
+# running the renderer from the old location.
+_witness="$(dirname "${BASH_SOURCE[0]}")/statusline-witness"
+if [ -f "$_witness" ]; then
+  _shipped=$(cat "$_witness" 2>/dev/null)
+  if [ -n "$_shipped" ] && [ "$_shipped" != "$VERSION" ]; then
+    segments+=("${C_STALE}⚠ /statusline:status${C_RESET}")
+  fi
+fi
+unset _witness _shipped
 
 # 1. Connected user's email
 email=""
