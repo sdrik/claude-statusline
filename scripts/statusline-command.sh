@@ -1,8 +1,25 @@
 #!/bin/bash
 # Claude Code statusline
-# Order: email | mode | model | effort | tokens in/out | rate limit usage
+# Order: email | mode | model | effort | context | loop turns | rate limit usage
 
 command -v jq >/dev/null 2>&1 || exit 0
+
+# Degradation anchors. These are product choices, not research results —
+# see the "Session degradation" section of the README before changing them.
+CTX_WARN=${STATUSLINE_CTX_WARN:-100000}   # tokens: gauge turns yellow
+CTX_CRIT=${STATUSLINE_CTX_CRIT:-200000}   # tokens: gauge turns red, and full scale
+TURNS_LO=${STATUSLINE_TURNS_MIN:-30}      # loop turns: below this the counter stays green
+TURNS_HI=${STATUSLINE_TURNS_MAX:-250}     # loop turns: at or above this it saturates red
+
+# A non-numeric override would otherwise mis-scale the gauge and spam stderr on
+# every refresh, so fall back to the default instead of trusting the value.
+for _v in CTX_WARN:100000 CTX_CRIT:200000 TURNS_LO:30 TURNS_HI:250; do
+  _name=${_v%%:*}
+  case ${!_name} in
+    '' | *[!0-9]*) eval "$_name=${_v##*:}" ;;
+  esac
+done
+unset _v _name
 
 input="$(cat)"
 
@@ -13,11 +30,11 @@ C_EMAIL=$'\033[36m'   # cyan
 C_MODE=$'\033[35m'    # magenta
 C_MODEL=$'\033[34m'   # blue
 C_EFFORT=$'\033[33m'  # yellow
-C_TOKENS=$'\033[32m'  # green
-C_LIMITS=$'\033[31m'  # red
-C_CTX_LO=$'\033[32m'  # green  (< 50%)
-C_CTX_MID=$'\033[33m' # yellow (50-79%)
-C_CTX_HI=$'\033[31m'  # red    (>= 80%)
+# Tier colors. Rate-limit gauges tier on a percentage (50% / 80%); the context
+# gauge tiers on absolute tokens (CTX_WARN / CTX_CRIT) instead.
+C_CTX_LO=$'\033[32m'  # green
+C_CTX_MID=$'\033[33m' # yellow
+C_CTX_HI=$'\033[31m'  # red
 
 SEP="${C_DIM} │ ${C_RESET}"
 
@@ -56,7 +73,7 @@ model=$(printf '%s' "$input" | jq -r '.model.display_name // empty')
 effort=$(printf '%s' "$input" | jq -r '.effort.level // empty')
 [ -n "$effort" ] && segments+=("${C_EFFORT}${effort}${C_RESET}")
 
-# 5. Input / output tokens
+# Formatting helpers
 fmt_tokens() {
   awk -v n="$1" 'BEGIN{
     if (n=="" || n=="null") { print ""; exit }
@@ -71,11 +88,16 @@ tier_color() {
   elif [ "$1" -ge 50 ]; then printf '%s' "$C_CTX_MID";
   else printf '%s' "$C_CTX_LO"; fi
 }
-# gauge <pct> -> 13-cell bar, fill as colored BACKGROUND, percentage centered on top
+# tier_bg <pct> -> 256-color background code by usage threshold
+tier_bg() {
+  if [ "$1" -ge 80 ]; then printf '124';
+  elif [ "$1" -ge 50 ]; then printf '136';
+  else printf '28'; fi
+}
+# gauge <pct> <bg> -> 13-cell bar, fill as colored BACKGROUND, percentage centered on top
 gauge() {
-  awk -v p="$1" 'BEGIN{
+  awk -v p="$1" -v bg="$2" 'BEGIN{
     esc=sprintf("%c", 27);
-    if (p>=80) bg=124; else if (p>=50) bg=136; else bg=28;
     w=13; f=int(p/100*w+0.5); if(f>w)f=w; if(f<0)f=0;
     lab=sprintf("%d%%", p); ll=length(lab); start=int((w-ll)/2);
     fillbg=sprintf("%s[48;5;%d;38;5;255;1m", esc, bg);   # colored bg, bright bold text
@@ -90,15 +112,38 @@ gauge() {
   }'
 }
 
-# 5. Context window consumption + I/O tokens (merged):
+# 5. Context consumption + I/O tokens (merged):
 #    bar + percentage + ↑input/window + ↓output
-ctx_used=$(printf '%s' "$input" | jq -r '.context_window.used_percentage // empty')
+#
+# The bar reads on the ABSOLUTE token scale (0 → CTX_CRIT), not as a fraction of
+# the model's advertised window: degradation tracks absolute tokens, and a 1M
+# window would otherwise show a near-empty bar well past the danger zone. The
+# window fraction is not lost — ↑input/window states it literally.
+#
+# `exceeds_200k_tokens` is deliberately unused: the harness derives it from this
+# very token count against a fixed 200000, so honouring it would silently cap
+# CTX_CRIT and paint a quarter-full bar red on a tuned 1M window.
 ctx_size=$(printf '%s' "$input" | jq -r '.context_window.context_window_size // empty')
 tin_raw=$(printf '%s' "$input" | jq -r '.context_window.total_input_tokens // empty')
 tout_raw=$(printf '%s' "$input" | jq -r '.context_window.total_output_tokens // empty')
-if [ -n "$ctx_used" ] && [ "$ctx_used" != "null" ]; then
-  ctx_color=$(tier_color "$ctx_used")
-  ctx_str="${C_RESET}$(gauge "$ctx_used")${ctx_color}"
+# total_input_tokens is a literal 0 before the first API response, whereas
+# used_percentage is null — so the latter is what tells us the session started.
+ctx_started=$(printf '%s' "$input" | jq -r '.context_window.used_percentage // empty')
+# Integer form for the -ge threshold comparisons below.
+tin_int=$(LC_ALL=C printf '%.0f' "${tin_raw:-0}" 2>/dev/null) || tin_int=0
+if [ -n "$ctx_started" ] && [ -n "$tin_raw" ] && [ "$tin_raw" != "null" ]; then
+  ctx_pct=$(awk -v t="$tin_raw" -v c="$CTX_CRIT" 'BEGIN{
+    if (c<=0) { print 100; exit }
+    p=int(100*t/c+0.5); if(p>100)p=100; if(p<0)p=0; print p;
+  }')
+  if [ "$tin_int" -ge "$CTX_CRIT" ]; then
+    ctx_color=$C_CTX_HI ctx_bg=124
+  elif [ "$tin_int" -ge "$CTX_WARN" ]; then
+    ctx_color=$C_CTX_MID ctx_bg=136
+  else
+    ctx_color=$C_CTX_LO ctx_bg=28
+  fi
+  ctx_str="${C_RESET}$(gauge "$ctx_pct" "$ctx_bg")${ctx_color}"
   # ↑ input tokens / context window size (input count == context numerator)
   tin=$(fmt_tokens "$tin_raw")
   if [ -n "$tin" ]; then
@@ -114,7 +159,27 @@ if [ -n "$ctx_used" ] && [ "$ctx_used" != "null" ]; then
   segments+=("${ctx_color}${ctx_str}${C_RESET}")
 fi
 
-# 6. Usage against Claude.ai subscription rate limits
+# 6. Agent-loop turns: one API request per loop iteration (model call + the tool
+# calls it triggers). A correlated symptom of a degrading session, not a cause —
+# long trajectories and thrashing co-occur, and the causal direction is
+# confounded. Hence a continuous gradient and no alarm: there is no cliff to
+# alarm on. Absent until the first API response of a session.
+#
+# turns_color <n> -> foreground color interpolated on a green→red ramp
+turns_color() {
+  awk -v n="$1" -v lo="$TURNS_LO" -v hi="$TURNS_HI" 'BEGIN{
+    split("34 70 106 148 184 220 214 208 202 196", ramp, " ");
+    t = (hi<=lo) ? 1 : (n-lo)/(hi-lo);
+    if(t<0)t=0; if(t>1)t=1;
+    printf "%c[38;5;%dm", 27, ramp[int(t*9+0.5)+1];
+  }'
+}
+turns=$(printf '%s' "$input" | jq -r '.prompt_cache.requests // empty')
+if [ -n "$turns" ] && [ "$turns" != "null" ]; then
+  segments+=("$(turns_color "$turns")⟳${turns}${C_RESET}")
+fi
+
+# 7. Usage against Claude.ai subscription rate limits
 # time_left <resets_at> -> " Xd Yh" / " 2h14" / " 24m" or nothing
 time_left() {
   local reset_iso="$1" reset_epoch now diff d h m
@@ -148,11 +213,11 @@ week_reset=$(printf '%s' "$input" | jq -r '.rate_limits.seven_day.resets_at // e
 # each window is its own segment: "<label>:<gauge> (time left)", colored by threshold
 if [ -n "$five" ]; then
   fv=$(LC_ALL=C printf '%.0f' "$five"); col=$(tier_color "$fv")
-  segments+=("${C_RESET}$(gauge "$fv")${col}$(time_left "$five_reset")${C_RESET}")
+  segments+=("${C_RESET}$(gauge "$fv" "$(tier_bg "$fv")")${col}$(time_left "$five_reset")${C_RESET}")
 fi
 if [ -n "$week" ]; then
   wk=$(LC_ALL=C printf '%.0f' "$week"); col=$(tier_color "$wk")
-  segments+=("${C_RESET}$(gauge "$wk")${col}$(time_left "$week_reset")${C_RESET}")
+  segments+=("${C_RESET}$(gauge "$wk" "$(tier_bg "$wk")")${col}$(time_left "$week_reset")${C_RESET}")
 fi
 
 # Join segments with separator
