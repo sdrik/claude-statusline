@@ -434,6 +434,68 @@ run_hook
 eq "bascule retour : stable a la session suivante" "$(sl_command)" "$back"
 eq "bascule retour : settings.json pas reecrit" "$(ls -i "$SETTINGS" | awk '{print $1}')" "$inode"
 
+# --- entree 1.x dont le renderer a disparu ------------------------------------
+
+# L'utilisateur a supprime ~/.claude/statusline-command.sh a la main en laissant
+# l'entree en place : la statusline est deja vide. Exiger le fichier pour
+# prouver la propriete rendait le cas irreparable a jamais, alors que le texte
+# de l'entree est mot pour mot ce que notre propre installeur 1.x ecrivait et
+# qu'il n'y a rien a ecraser.
+env_new 2.0.0
+jq -n '{statusLine:{type:"command",command:"bash \"$HOME/.claude/statusline-command.sh\""}}' \
+  > "$SETTINGS"
+run_hook
+ok "1.x orphelin : settings.json repointe sur le dest" "$(sl_command)" "$DEST"
+
+# Mais un fichier PRESENT et inconnu reste la propriete de quelqu'un d'autre :
+# l'absence est la preuve, pas le chemin.
+env_new 2.0.0
+printf '#!/bin/bash\nprintf maison\n' > "$LEGACY"
+jq -n '{statusLine:{type:"command",command:"bash \"$HOME/.claude/statusline-command.sh\""}}' \
+  > "$SETTINGS"
+run_hook
+eq "1.x hash inconnu : toujours intouche" \
+  "$(sl_command)" 'bash "$HOME/.claude/statusline-command.sh"'
+yes_file "1.x hash inconnu : le fichier survit" "$LEGACY"
+
+# --- un HOME aux caracteres speciaux -------------------------------------------
+
+# La commande gardee interpole $DEST dans une chaine entre guillemets doubles
+# qu'un shell reexecutera. Un HOME contenant " ` ou $ y produirait une entree
+# cassee -- ou une substitution de commande -- et la reconnaissance de propriete
+# la relouperait ensuite a chaque session. L'assertion qui compte n'est pas la
+# forme de l'entree mais qu'un shell l'execute et obtienne bien le renderer.
+weird=$(mktemp -d)
+temps+=("$weird")
+# En production CLAUDE_PLUGIN_DATA vit SOUS $HOME, donc c'est un HOME bizarre
+# qui rend la destination bizarre. On reproduit ce couplage.
+odd='ho"me $x`id`'
+if mkdir -p "$weird/$odd/.claude" "$weird/$odd/data" 2>/dev/null; then
+  env_new 2.0.0
+  export HOME="$weird/$odd"
+  export CLAUDE_PLUGIN_DATA="$HOME/data/statusline-sdrik-plugins"
+  SETTINGS="$HOME/.claude/settings.json"
+  POINTER="$HOME/.claude/statusline-plugin.json"
+  DEST="$CLAUDE_PLUGIN_DATA/statusline-command.sh"
+  run_hook
+  yes_file "dest special : le renderer est installe" "$DEST"
+  got=$(bash -c "$(sl_command)" 2>/dev/null < /dev/null)
+  no "dest special : la commande gardee ne crie pas au renderer absent" \
+    "$got" "renderer absent"
+  # `id` dans le chemin : s'il avait ete substitue, la sortie le montrerait.
+  no "dest special : aucune substitution de commande" "$got" "uid="
+  # Et elle doit rester reconnue comme notre a la session suivante, sinon le
+  # hook reecrirait settings.json a chaque demarrage.
+  first=$(sl_command)
+  inode=$(ls -i "$SETTINGS" | awk '{print $1}')
+  run_hook
+  eq "dest special : entree stable" "$(sl_command)" "$first"
+  eq "dest special : settings.json pas reecrit" \
+    "$(ls -i "$SETTINGS" | awk '{print $1}')" "$inode"
+else
+  printf 'SKIP destination aux caracteres speciaux non creable\n'
+fi
+
 # --- silence ------------------------------------------------------------------
 
 # Le stdout d'un hook SessionStart est injecte dans le contexte du modele : le

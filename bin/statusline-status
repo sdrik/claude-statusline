@@ -28,6 +28,10 @@ fi
 # the whole report on an unparseable file — including the branches that exist
 # precisely to report one.
 dest=$(jq -r '.dest // empty' "$POINTER" 2>/dev/null || true)
+# The hook escapes the destination before embedding it in the command it
+# writes, so that is the form to look for below. Identical to $dest for any
+# path without " ` or $ in it.
+dest_q=$(printf '%s' "$dest" | sed 's/[\\"`$]/\\&/g')
 shipped=$(jq -r '.version // empty' "$POINTER" 2>/dev/null || true)
 echo "Renderer:        ${dest:-<unknown>}"
 echo "Shipped version: ${shipped:-<unknown>}"
@@ -45,6 +49,14 @@ if [ -f "$dest" ]; then
     echo "  The hook retries at every session start; if it keeps failing, check"
     echo "  that $(dirname "$dest") is writable."
   fi
+elif [ -d "$(dirname "$dest")" ]; then
+  # The pointer is published even when the copy failed, so a data directory
+  # with no renderer in it is an install failing at every session start — not
+  # an uninstall, which takes the whole directory with it. Saying "uninstalled"
+  # here sends the user to reinstall a plugin that is already installed.
+  echo "Installed:       missing"
+  echo "  The directory is there but the renderer is not: the copy is failing"
+  echo "  at every session start. Check that $(dirname "$dest") is writable."
 else
   echo "Installed:       missing"
   echo "  The renderer is gone (uninstalling the plugin deletes its data"
@@ -62,7 +74,7 @@ if [ -f "$SETTINGS" ]; then
   fi
   if [ -z "$current" ]; then
     echo "settings.json:   no statusLine entry (it is written at session start)"
-  elif printf '%s' "$current" | grep -qF -- "$dest"; then
+  elif printf '%s' "$current" | grep -qF -- "$dest_q"; then
     echo "settings.json:   wired to this renderer"
   else
     echo "settings.json:   wired to something else — left untouched on purpose:"

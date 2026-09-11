@@ -207,7 +207,7 @@ expected rather than exceptional.
 
 ## Development
 
-Two suites, no dependencies beyond the ones the renderer itself needs:
+Three suites, no dependencies beyond the ones the renderer itself needs:
 
 - `bash tests/render.test.sh` — feeds synthetic payloads to the renderer and
   asserts on the escape sequences it emits.
@@ -215,6 +215,10 @@ Two suites, no dependencies beyond the ones the renderer itself needs:
   a fake plugin root and data directory, and asserts on what it wrote. Every
   branch that decides *whether* to write to `settings.json` is covered there,
   which is what justifies letting a hook write to `$HOME` at all.
+- `bash tests/status.test.sh` — runs the diagnostic in a throwaway `$HOME` and
+  asserts on what it tells the user. Every branch there answers "why is my
+  status line not what I expect?", so a wrong answer sends someone to fix the
+  wrong thing.
 
 Loading a checkout with `--plugin-dir` is the supported development mode, and
 the hook detects it: a checkout loaded that way gets a data directory named

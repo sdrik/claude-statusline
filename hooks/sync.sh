@@ -115,6 +115,14 @@ sha_of() {
   fi
 }
 
+# shell_quoted <string> -> the string made safe to sit inside a double-quoted
+# word of the command we write into settings.json. That command is re-executed
+# by a shell, so a $HOME carrying " ` or $ would otherwise produce a broken
+# entry — or a command substitution — and the ownership test below would then
+# fail to recognise our own handiwork at every session start.
+shell_quoted() { printf '%s' "$1" | sed 's/[\\"`$]/\\&/g'; }
+DEST_Q=$(shell_quoted "$DEST")
+
 # is_ours_legacy -> true when $LEGACY is byte-for-byte a renderer we shipped
 is_ours_legacy() {
   local sha
@@ -142,7 +150,7 @@ if [ "$copied" = 1 ] || [ -f "$DEST" ]; then
     current=$(jq -r '.statusLine.command // empty' "$SETTINGS" 2>/dev/null)
     if [ -z "$current" ]; then
       owned="new"
-    elif printf '%s' "$current" | grep -qF -- "$DEST"; then
+    elif printf '%s' "$current" | grep -qF -- "$DEST_Q"; then
       owned="current"
     elif printf '%s' "$current" | grep -qF -- "$GUARD_MARK"; then
       # A guarded command we wrote ourselves, but naming a destination that is
@@ -161,7 +169,18 @@ if [ "$copied" = 1 ] || [ -f "$DEST" ]; then
       || printf '%s' "$current" | grep -qF -- "$LEGACY"; then
       # The pre-2.0.0 installer wrote $HOME literally, for the shell that runs
       # the command to expand; an expanded form is accepted too.
-      is_ours_legacy && owned="legacy"
+      #
+      # Nothing at the legacy path is proof too, of a different kind: there is
+      # no file to take from anyone, the status line the entry describes is
+      # already blank, and the entry is byte-for-byte what our own 1.x
+      # installer wrote. Requiring the file made that state unrepairable for
+      # good. A file that IS there and hashes to nothing we shipped stays
+      # someone else's, as before — absence is the proof, not the path.
+      if is_ours_legacy; then
+        owned="legacy"
+      elif [ ! -e "$LEGACY" ]; then
+        owned="orphan"
+      fi
     fi
   fi
 fi
@@ -171,7 +190,7 @@ if [ -n "$owned" ]; then
   # statusLine whose command is missing leaves the line blank and silent with no
   # retry. The guard turns that dead end into an instruction, which the badge
   # cannot do — nothing of ours runs at all once the renderer is gone.
-  guard="[ -f \"$DEST\" ] && exec bash \"$DEST\" || printf '$GUARD_MARK — retirez statusLine de settings.json ou réinstallez le plugin'"
+  guard="[ -f \"$DEST_Q\" ] && exec bash \"$DEST_Q\" || printf '$GUARD_MARK — retirez statusLine de settings.json ou réinstallez le plugin'"
   wired=0
   if [ "${current:-}" = "$guard" ]; then
     # Already byte-for-byte what we would write. Rewriting it anyway would put a
