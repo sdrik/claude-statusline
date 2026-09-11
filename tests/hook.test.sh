@@ -191,6 +191,47 @@ no_file "inline : aucun temoin" "$WITNESS"
 no_file "inline : aucun pointeur" "$POINTER"
 no_file "inline : settings.json pas cree" "$SETTINGS"
 
+# --- marqueur de chantier : le hook ne fait rien -------------------------------
+
+# Une marketplace locale n'execute PAS une copie : CLAUDE_PLUGIN_ROOT pointe sur
+# l'arbre de travail lui-meme, et une edition y est prise des la session
+# suivante, sans reinstallation. Un depot installe comme sa propre marketplace
+# et laisse en place fait donc tourner le sync.sh en cours d'ecriture contre la
+# vraie configuration de l'utilisateur. Le marqueur est le frein a main, et sa
+# polarite est inversee a dessein : rien de pose = ce que recoit un vrai
+# utilisateur, donc une recette de release teste exactement cet etat-la.
+env_new 2.0.0
+: > "$CLAUDE_PLUGIN_ROOT/.statusline-dev-hold"
+run_hook
+no_file "marqueur : aucun renderer installe" "$DEST"
+no_file "marqueur : aucun temoin" "$WITNESS"
+no_file "marqueur : aucun pointeur" "$POINTER"
+no_file "marqueur : settings.json pas cree" "$SETTINGS"
+
+# Seule l'existence compte : un contenu a interpreter est un contenu qu'on peut
+# mal interpreter, et un marqueur vide doit freiner comme un autre.
+env_new 2.0.0
+printf 'peu importe\n' > "$CLAUDE_PLUGIN_ROOT/.statusline-dev-hold"
+run_hook
+no_file "marqueur non vide : aucun renderer installe" "$DEST"
+
+# Il ne doit pas non plus toucher a une installation deja en place : le frein
+# arrete le hook, il ne demonte pas ce que les sessions precedentes ont cable.
+env_new 2.0.0
+run_hook
+wired=$(sl_command)
+: > "$CLAUDE_PLUGIN_ROOT/.statusline-dev-hold"
+rm -f "$WITNESS"
+run_hook
+eq "marqueur : settings.json intact" "$(sl_command)" "$wired"
+no_file "marqueur : le temoin n'est pas reecrit" "$WITNESS"
+
+# Et il est muet, comme tout le reste du cas nominal.
+env_new 2.0.0
+: > "$CLAUDE_PLUGIN_ROOT/.statusline-dev-hold"
+out=$(bash "$HOOK" 2>/dev/null)
+eq "marqueur : rien sur stdout" "$out" ""
+
 # --- echec de copie => badge --------------------------------------------------
 
 # Le temoin est ecrit AVANT la tentative de copie : c'est ce qui rend l'echec
@@ -292,21 +333,45 @@ no "deux executions : pas de badge" "$(render_installed)" "⚠"
 # reecrit le fichier de l'utilisateur pour rien a chaque demarrage de session.
 eq "deux executions : settings.json pas reecrit" "$(ls -i "$SETTINGS" | awk '{print $1}')" "$inode"
 
-# --- le dossier de donnees a bouge -------------------------------------------
+# --- bascule du gagnant -------------------------------------------------------
 
-# CLAUDE_PLUGIN_DATA porte le nom de la marketplace : la reinstaller depuis une
-# autre deplace la destination. L'entree qu'on a ecrite nous-memes doit rester
-# reconnaissable, sinon la statusline reste bloquee pour de bon sur l'avis
-# "renderer absent".
+# Le meme plugin installe depuis deux marketplaces obtient deux destinations,
+# CLAUDE_PLUGIN_DATA portant le nom de la marketplace. Une seule copie se charge
+# a la fois -- la premiere clef <nom>@<marketplace> de enabledPlugins -- donc un
+# seul hook tourne et les deux ne peuvent pas se disputer settings.json. Mais ce
+# gagnant BASCULE : desactiver la copie gagnante promeut l'autre, et reordonner
+# enabledPlugins aussi. L'ancien dossier de donnees, lui, RESTE sur disque,
+# puisque son plugin est toujours installe -- c'est ce qui distingue cette
+# bascule d'une desinstallation, et c'est pour ca que l'existence de l'ancienne
+# destination ne peut pas servir de preuve de propriete.
+#
+# L'entree qu'on a ecrite nous-memes doit donc rester reconnaissable a son
+# sentinelle seule. Sans ca, la statusline resterait bloquee pour de bon sur
+# l'avis "renderer absent" apres la moindre bascule.
 env_new 2.0.0 statusline-marche-a
 run_hook
+dest_a="$DEST"
 moved=$(sl_command)
 export CLAUDE_PLUGIN_DATA="${CLAUDE_PLUGIN_DATA%-a}-b"
 DEST="$CLAUDE_PLUGIN_DATA/statusline-command.sh"
 run_hook
-ok "dest deplace : settings.json repointe" "$(sl_command)" "$DEST"
-no "dest deplace : l'ancien dest a disparu de l'entree" "$(sl_command)" "$moved"
-yes_file "dest deplace : le renderer est installe au nouvel endroit" "$DEST"
+ok "bascule : settings.json repointe" "$(sl_command)" "$DEST"
+no "bascule : l'ancien dest a disparu de l'entree" "$(sl_command)" "$moved"
+yes_file "bascule : le renderer est installe au nouvel endroit" "$DEST"
+# Le coeur du cas : l'install perdante est masquee, pas desinstallee.
+yes_file "bascule : l'ancienne destination existe toujours" "$dest_a"
+
+# La bascule inverse doit reprendre la main de la meme facon. Un seul hook
+# tournant a la fois, ca converge a chaque fois au lieu d'osciller.
+export CLAUDE_PLUGIN_DATA="${CLAUDE_PLUGIN_DATA%-b}-a"
+DEST="$dest_a"
+run_hook
+ok "bascule retour : settings.json repointe" "$(sl_command)" "$dest_a"
+back=$(sl_command)
+inode=$(ls -i "$SETTINGS" | awk '{print $1}')
+run_hook
+eq "bascule retour : stable a la session suivante" "$(sl_command)" "$back"
+eq "bascule retour : settings.json pas reecrit" "$(ls -i "$SETTINGS" | awk '{print $1}')" "$inode"
 
 # --- silence ------------------------------------------------------------------
 

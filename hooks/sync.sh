@@ -35,6 +35,20 @@ case "$(basename "$CLAUDE_PLUGIN_DATA")" in
   *-inline) exit 0 ;;
 esac
 
+# 1 bis. Frein a main du developpeur. Une marketplace locale n'execute PAS la
+# copie qu'elle met en cache : CLAUDE_PLUGIN_ROOT pointe sur l'arbre de travail,
+# et une edition y est prise des la session suivante, sans reinstallation. Un
+# depot installe comme sa propre marketplace pour une recette, puis laisse en
+# place, fait donc tourner ce fichier en cours d'ecriture contre la vraie
+# configuration de l'utilisateur, avec ses pleins privileges -- c'est le seul
+# etat que ce marqueur existe pour couvrir, le developpement courant passant par
+# --plugin-dir, que la garde ci-dessus arrete deja.
+#
+# La polarite est inversee a dessein : rien de pose = ce que recoit un vrai
+# utilisateur, donc une recette teste exactement l'etat livre. Seule l'existence
+# compte -- un contenu a interpreter est un contenu qu'on peut mal interpreter.
+[ -e "$CLAUDE_PLUGIN_ROOT/.statusline-dev-hold" ] && exit 0
+
 SRC="$CLAUDE_PLUGIN_ROOT/scripts/statusline-command.sh"
 MANIFEST="$CLAUDE_PLUGIN_ROOT/.claude-plugin/plugin.json"
 DEST="$CLAUDE_PLUGIN_DATA/statusline-command.sh"

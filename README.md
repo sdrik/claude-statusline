@@ -78,10 +78,23 @@ shipped, nothing is moved and nothing is deleted.
 
 ### Turning it off
 
-- **No status line at all:** disable or uninstall the plugin. Uninstalling
-  deletes the plugin's data directory, so the renderer goes with it; the
-  `statusLine` entry left behind in your settings prints a short notice telling
+**The opt-out is removing the `statusLine` entry from `~/.claude/settings.json`.**
+Nothing else fully turns the status line off, and the two things that look like
+they would are worth spelling out:
+
+- **Disabling the plugin only freezes it.** A disabled plugin's hook does not
+  run — but its data directory, the renderer inside it, and your `statusLine`
+  entry pointing at that renderer all stay exactly where they are. The status
+  line keeps rendering, at whatever version it had reached, forever.
+- **Uninstalling** deletes the plugin's data directory, so the renderer goes
+  with it; the `statusLine` entry left behind then prints a short notice telling
   you to remove it, rather than leaving the line silently blank.
+
+**Order matters.** Remove the `statusLine` entry *first*, disable or uninstall
+*second*. A disabled plugin takes its commands with it, so disabling first also
+takes away `/statusline:status` — the one thing that could have told you your
+settings still point at a frozen renderer.
+
 - **Keep the plugin, no status line:** set `statusLine` to `{"type": "command",
   "command": "true"}` yourself. The hook sees an entry it cannot prove is its
   own and never touches it again.
@@ -229,6 +242,42 @@ live, so an edit to the renderer shows up at the next refresh with no restart.
 Running the renderer straight from the checkout leaves the `@@VERSION@@`
 placeholder unsubstituted, which is harmless: with no witness file beside it,
 the staleness badge has nothing to compare against and stays silent.
+
+### Release acceptance, and the hand brake
+
+`--plugin-dir` can never exercise the install hook end to end, by construction:
+the hook bails out on the `-inline` data directory it produces. The only route
+that gives the plugin a real identity and a real data directory is installing it
+from a marketplace — and this repository is its own, so:
+
+```sh
+claude plugin marketplace add /path/to/claude-statusline
+claude plugin install statusline@claude-statusline
+```
+
+**That install is not a sandbox.** A marketplace added by path does not run the
+copy it caches: `CLAUDE_PLUGIN_ROOT` points at your working tree, and an edit
+there takes effect at the very next session start, with no reinstall and no
+`marketplace update`. A half-written `hooks/sync.sh` runs for real, against your
+own `settings.json`, with your full privileges. So: install it for the
+acceptance run, and uninstall it when you are done.
+
+For the times you forget, there is a hand brake — create an empty
+`.statusline-dev-hold` at the root of the checkout and the hook exits
+immediately, before it can write anything:
+
+```sh
+touch .statusline-dev-hold
+```
+
+It is gitignored, only its existence is read, and its polarity is deliberate:
+with nothing in place the hook behaves exactly as it does for a real user, so an
+acceptance run with the file removed tests what actually ships.
+
+Note that only one copy of a plugin loads at a time, even when the same name is
+installed from several marketplaces — the winner is the first `<name>@<market>`
+key in `enabledPlugins`. So installing this repository alongside another copy
+does not run two hooks; it replaces which one runs.
 
 ## How it works
 

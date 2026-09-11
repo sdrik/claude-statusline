@@ -4,6 +4,5 @@
   "version": "2.0.0",
   "author": { "name": "Cédric Schieli", "email": "cschieli@gmail.com" },
   "license": "MIT",
-  "keywords": ["statusline", "status-line", "context", "rate-limit", "turns"],
-  "hooks": "./hooks/hooks.json"
+  "keywords": ["statusline", "status-line", "context", "rate-limit", "turns"]
 }
