@@ -63,12 +63,16 @@ LEGACY="$CLAUDE_DIR/statusline-command.sh"
 # treat it as a wire format: changing it orphans every entry already written
 # with the old wording.
 GUARD_MARK='⚠ renderer absent'
-# Renderers we have shipped, by sha256. Recognising our own past installations
-# is what lets us adopt them (step 4) instead of presuming ownership. A hash
-# missing from this list degrades into refusing to write — a visible failure
-# rather than a silent overwrite — so add one entry per released renderer.
+# Renderers we have shipped, by sha256, one entry per released renderer. This
+# is what lets us adopt our own past installations (step 4) instead of presuming
+# ownership. A missing entry does NOT degrade visibly: the user stays on their
+# 1.x renderer, which has no witness beside it and therefore never raises the
+# staleness badge, while /statusline:status calls the non-migration deliberate.
+# tests/hook.test.sh asserts this list against the renderers reproduced from
+# git, so a forgotten release fails the suite instead of failing a user.
 LEGACY_SHA256="
 b0a607d99dec6cc61cf4286fb6cd4ee318949ab84dc74a81c3dc5159439b52b4
+102bbd41a8070d41d781d3ca63ba6bf016b8f597d4e66408fc30405f7ca44f9a
 "
 
 version=$(jq -r '.version // empty' "$MANIFEST" 2>/dev/null)

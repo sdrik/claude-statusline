@@ -8,10 +8,23 @@
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 HOOK="$ROOT/hooks/sync.sh"
-# The renderer we shipped in 1.0.0 (commit bcabb0a). The hook trusts this hash
-# to recognise its own past installations; the test reproduces the file from
-# git so the constant is checked against the real artefact, not against itself.
-LEGACY_SHA=b0a607d99dec6cc61cf4286fb6cd4ee318949ab84dc74a81c3dc5159439b52b4
+# Every renderer this plugin has released, one "commit version" pair per line.
+# Add a line here at each release. The hook recognises its own past
+# installations by hashing the file it finds, so this list and the hook's
+# LEGACY_SHA256 must hold exactly the same set -- which is asserted below,
+# against the artefacts reproduced from git rather than against a constant.
+RELEASED="
+bcabb0a 1.0.0
+4e1b21e 1.1.0
+"
+
+# The hashes the hook is willing to adopt, read out of the hook itself.
+hook_hashes() {
+  sed -n '/^LEGACY_SHA256="/,/^"$/p' "$HOOK" | grep -E '^[0-9a-f]{64}$'
+}
+
+# renderer_of <commit> -> that release's renderer on stdout
+renderer_of() { git -C "$ROOT" show "$1:scripts/statusline-command.sh"; }
 pass=0
 fail=0
 temps=()
@@ -140,24 +153,72 @@ eq "opt-out par 'true' : respecte" "$(sl_command)" "true"
 
 # --- migration depuis l'ancien chemin ----------------------------------------
 
-if ! git -C "$ROOT" show bcabb0a:scripts/statusline-command.sh > /dev/null 2>&1; then
-  printf 'FAIL migration : impossible de reproduire le renderer 1.0.0 depuis git\n'
-  fail=$((fail + 1))
-else
+# Tout renderer publie doit etre reconnu, pas seulement le premier. Un hash
+# manquant, c'est un utilisateur jamais migre, EN SILENCE : le fichier fige n'a
+# pas de temoin a cote, donc aucun badge ne se declenche, et le diagnostic
+# annonce "wired to something else -- left untouched on purpose", c'est-a-dire
+# qu'il presente la panne comme une decision. Ca ne se voit pas a l'usage.
+released_shas=""
+while read -r commit version; do
+  [ -n "$commit" ] || continue
+  if ! renderer_of "$commit" > /dev/null 2>&1; then
+    printf 'FAIL renderer %s introuvable dans git (%s)\n' "$version" "$commit"
+    fail=$((fail + 1))
+    continue
+  fi
+  sha=$(renderer_of "$commit" | sha256sum | cut -d' ' -f1)
+  released_shas="$released_shas$sha
+"
+  if hook_hashes | grep -qxF "$sha"; then
+    pass=$((pass + 1))
+  else
+    fail=$((fail + 1))
+    printf 'FAIL le renderer %s (%s) manque a LEGACY_SHA256\n  hash : %s\n' \
+      "$version" "$commit" "$sha"
+  fi
+done <<EOF
+$RELEASED
+EOF
+
+# Et l'inverse : un hash de trop, c'est un fichier qu'on adopterait puis
+# supprimerait sans savoir d'ou il sort.
+while read -r sha; do
+  [ -n "$sha" ] || continue
+  if printf '%s' "$released_shas" | grep -qxF "$sha"; then
+    pass=$((pass + 1))
+  else
+    fail=$((fail + 1))
+    printf 'FAIL LEGACY_SHA256 accepte un hash qui n_est aucun renderer publie\n  hash : %s\n' "$sha"
+  fi
+done <<EOF
+$(hook_hashes)
+EOF
+
+# La migration elle-meme, rejouee depuis chaque version publiee.
+while read -r commit version; do
+  [ -n "$commit" ] || continue
+  renderer_of "$commit" > /dev/null 2>&1 || continue
   env_new 2.0.0
-  git -C "$ROOT" show bcabb0a:scripts/statusline-command.sh > "$LEGACY"
-  eq "le renderer 1.0.0 reproduit a bien le hash attendu" \
-    "$(sha256sum < "$LEGACY" | cut -d' ' -f1)" "$LEGACY_SHA"
+  renderer_of "$commit" > "$LEGACY"
   # Forme exacte ecrite par l'ancien installeur : $HOME reste litteral.
   jq -n '{statusLine:{type:"command",command:"bash \"$HOME/.claude/statusline-command.sh\""}}' \
     > "$SETTINGS"
   BAK="$LEGACY.pre-statusline-plugin.bak"
   printf '#!/bin/bash\n# le script personnel de quelqu un\n' > "$BAK"
   run_hook
-  ok "migration : settings.json repointe sur le dest" "$(sl_command)" "$DEST"
-  no_file "migration : l'ancien renderer est supprime" "$LEGACY"
-  yes_file "migration : le .bak n'est jamais touche" "$BAK"
-  eq "migration : le .bak est intact" "$(sed -n 2p "$BAK")" "# le script personnel de quelqu un"
+  ok "migration $version : settings.json repointe sur le dest" "$(sl_command)" "$DEST"
+  no_file "migration $version : l'ancien renderer est supprime" "$LEGACY"
+  yes_file "migration $version : le .bak n'est jamais touche" "$BAK"
+  eq "migration $version : le .bak est intact" \
+    "$(sed -n 2p "$BAK")" "# le script personnel de quelqu un"
+done <<EOF
+$RELEASED
+EOF
+
+if ! renderer_of bcabb0a > /dev/null 2>&1; then
+  printf 'FAIL migration : impossible de reproduire le renderer 1.0.0 depuis git\n'
+  fail=$((fail + 1))
+else
 
   # Un statusLine qui vise le .bak n'est pas le notre, meme si l'ancien chemin
   # dont il derive porte, lui, un renderer que nous avons livre.
