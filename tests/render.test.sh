@@ -62,33 +62,33 @@ out=$(mk 50000 false - | render)
 no "pas de segment quand prompt_cache est absent" "$out" "⟳"
 
 out=$(mk 50000 false 42 | render)
-ok "affiche le nombre d'iterations" "$out" "⟳42"
+ok "affiche le nombre d'iterations" "$out" "⟳ 42"
 
-no "le compteur n'a pas de barre" "$out" "⟳42/"
+no "le compteur n'a pas de barre" "$out" "⟳ 42/"
 
 # Le degrade sature en vert sous l'ancre basse et en rouge au-dessus de la haute.
 out=$(mk 50000 false 5 | render)
-ok "vert sous l'ancre basse" "$out" "${ESC}[38;5;34m⟳5"
+ok "vert sous l'ancre basse" "$out" "${ESC}[38;5;34m⟳ 5"
 
 out=$(mk 50000 false 30 | render)
-ok "vert a l'ancre basse" "$out" "${ESC}[38;5;34m⟳30"
+ok "vert a l'ancre basse" "$out" "${ESC}[38;5;34m⟳ 30"
 
 out=$(mk 50000 false 250 | render)
-ok "rouge a l'ancre haute" "$out" "${ESC}[38;5;196m⟳250"
+ok "rouge a l'ancre haute" "$out" "${ESC}[38;5;196m⟳ 250"
 
 out=$(mk 50000 false 537 | render)
-ok "sature en rouge au-dela de l'ancre haute" "$out" "${ESC}[38;5;196m⟳537"
+ok "sature en rouge au-dela de l'ancre haute" "$out" "${ESC}[38;5;196m⟳ 537"
 
 out=$(mk 50000 false 140 | render)
-no "valeur mediane : pas vert" "$out" "${ESC}[38;5;34m⟳140"
-no "valeur mediane : pas rouge" "$out" "${ESC}[38;5;196m⟳140"
-ok "valeur mediane : affichee" "$out" "⟳140"
+no "valeur mediane : pas vert" "$out" "${ESC}[38;5;34m⟳ 140"
+no "valeur mediane : pas rouge" "$out" "${ESC}[38;5;196m⟳ 140"
+ok "valeur mediane : affichee" "$out" "⟳ 140"
 
 out=$(STATUSLINE_TURNS_MAX=100 render < <(mk 50000 false 100))
-ok "STATUSLINE_TURNS_MAX deplace l'ancre haute" "$out" "${ESC}[38;5;196m⟳100"
+ok "STATUSLINE_TURNS_MAX deplace l'ancre haute" "$out" "${ESC}[38;5;196m⟳ 100"
 
 out=$(STATUSLINE_TURNS_MIN=200 render < <(mk 50000 false 200))
-ok "STATUSLINE_TURNS_MIN deplace l'ancre basse" "$out" "${ESC}[38;5;34m⟳200"
+ok "STATUSLINE_TURNS_MIN deplace l'ancre basse" "$out" "${ESC}[38;5;34m⟳ 200"
 
 # --- jauge de contexte sur l'echelle des tokens absolus ----------------------
 
@@ -136,7 +136,7 @@ ok "les tokens entrants/sortants restent affiches" "$out" "↑90.0k/1.0M ↓5.0k
 # Le compteur se place apres la jauge de contexte et avant les quotas.
 # Pas d'horloge dans l'assertion : time_left relit `date` de son cote.
 plain=$(printf '%s' "$out" | sed 's/\x1b\[[0-9;]*m//g')
-if printf '%s' "$plain" | grep -qE '↑90\.0k/1\.0M ↓5\.0k │ ⟳42 │ .*[0-9]+[hm]'; then
+if printf '%s' "$plain" | grep -qE '↑90\.0k/1\.0M ↓5\.0k │ ⟳ 42 │ .*[0-9]+[hm]'; then
   pass=$((pass + 1))
 else
   fail=$((fail + 1))

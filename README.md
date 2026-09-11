@@ -12,7 +12,7 @@ email │ mode │ model │ effort │ context gauge │ loop turns │ 5h rate
 - **model** — active model display name
 - **effort** — reasoning effort level
 - **context gauge** — a coloured bar reading on the absolute token scale, plus `↑input/window ↓output` tokens
-- **loop turns** — `⟳N`, the number of agent-loop iterations so far, on a green→red gradient
+- **loop turns** — `⟳ N`, the number of agent-loop iterations so far, on a green→red gradient
 - **rate-limit gauges** — 5-hour and 7-day subscription usage bars, each with time until reset
 
 Rate-limit gauges are green below 50%, yellow from 50–79%, and red at 80% and
@@ -25,7 +25,7 @@ above. The context gauge and the turn counter tier differently — see
 - `jq` — **required**; the status line silently renders nothing if `jq` is missing
 - `awk`, `grep`, `tail`, `date`, `printf` — standard on Linux and macOS/BSD
 - Claude Code **v2.1.251 or later** for the turn counter; on older versions
-  every other segment still renders and `⟳N` is simply absent
+  every other segment still renders and `⟳ N` is simply absent
 
 Works on Linux (GNU) and macOS/BSD.
 
@@ -121,7 +121,7 @@ context gauge and the turn counter. They measure different things and are meant
 to be read side by side, because they call for different remedies — a full
 context calls for `/compact`, a long loop calls for a fresh session.
 
-### Loop turns (`⟳N`)
+### Loop turns (`⟳ N`)
 
 `N` is `prompt_cache.requests` from the status line payload: **one API request
 per agent-loop iteration** — a model call plus the tool calls it triggers.
@@ -139,7 +139,7 @@ There is no bar and no alarm, and that is deliberate:
   link between trajectory length and failure ([Coherence Collapse][cc], ρ=0.32,
   p=3.4×10⁻²³, 63.7% coherence collapse in the longest quartile against 21.7% in
   the shortest) comes with a warning from its own authors: agents "likely run
-  longer because they are thrashing, not the reverse". Read `⟳N` as a hint that
+  longer because they are thrashing, not the reverse". Read `⟳ N` as a hint that
   something may be going wrong, never as a measurement of what is.
 - **Degradation is continuous, with no cliff to alarm on.** Hence a gradient.
 
@@ -196,7 +196,7 @@ expected rather than exceptional.
 
 - **Resumed sessions may under-report.** Claude Code documents `/clear` as
   resetting the request counter but says nothing about `--resume` or `--continue`.
-  If it restarts from zero, `⟳N` under-reports on a resumed session. Unverified.
+  If it restarts from zero, `⟳ N` under-reports on a resumed session. Unverified.
 - **`/compact` behaviour is undocumented** for the same counter, and likewise
   unverified here.
 

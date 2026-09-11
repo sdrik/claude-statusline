@@ -206,7 +206,9 @@ turns_color() {
 }
 turns=$(printf '%s' "$input" | jq -r '.prompt_cache.requests // empty')
 if [ -n "$turns" ] && [ "$turns" != "null" ]; then
-  segments+=("$(turns_color "$turns")⟳${turns}${C_RESET}")
+  # Espace entre le glyphe et le nombre : colles, les deux se lisent comme un
+  # seul caractere illisible aux tailles de police courantes.
+  segments+=("$(turns_color "$turns")⟳ ${turns}${C_RESET}")
 fi
 
 # 7. Usage against Claude.ai subscription rate limits
