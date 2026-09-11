@@ -8,11 +8,16 @@
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 HOOK="$ROOT/hooks/sync.sh"
-# Every renderer this plugin has released, one "commit version" pair per line.
-# Add a line here at each release. The hook recognises its own past
-# installations by hashing the file it finds, so this list and the hook's
-# LEGACY_SHA256 must hold exactly the same set -- which is asserted below,
-# against the artefacts reproduced from git rather than against a constant.
+# Every renderer a PRE-2.0.0 installer copied to ~/.claude/statusline-command.sh,
+# one "commit version" pair per line. Nothing from 2.0.0 onwards belongs here:
+# the hook installs into the plugin data directory instead, and the shipped file
+# carries a @@VERSION@@ placeholder, so it has no stable hash to recognise. This
+# list closed with 1.1.0 and only reopens if a 1.x release is ever published.
+#
+# The hook recognises its own past installations by hashing the file it finds,
+# so this list and the hook's LEGACY_SHA256 must hold exactly the same set --
+# asserted below in both directions, against the artefacts reproduced from git
+# rather than against a constant.
 RELEASED="
 bcabb0a 1.0.0
 4e1b21e 1.1.0
