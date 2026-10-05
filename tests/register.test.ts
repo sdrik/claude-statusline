@@ -13,7 +13,7 @@ const SESSION_MODE = (columns: number, modes: string[] = []) => ({
   viewport: { columns, rows: 40 }, props: { modes },
 }) as const
 
-type Env = { settings?: string; files?: Record<string, string>; usage?: unknown; devHold?: boolean }
+type Env = { settings?: string; files?: Record<string, string>; usage?: unknown; devHold?: boolean; settingsRead?: object }
 
 /** Answers every call session.start makes; returns what the mod wrote and toasted. */
 function stubSession(on: any, env: Env = {}) {
@@ -27,7 +27,7 @@ function stubSession(on: any, env: Env = {}) {
   on('session.usage', () => ({ value: usage }))
   on('session.id', () => ({ value: 'sess-1' }))
   on('session.model', () => ({ value: 'claude-opus-5-5' }))
-  on('settings.read', () => ({ value: { effortLevel: 'medium', modelSettings: { 'claude-opus-5': { effortLevel: 'xhigh' } } } }))
+  on('settings.read', () => ({ value: env.settingsRead ?? { effortLevel: 'medium', modelSettings: { 'claude-opus-5-5': { effortLevel: 'xhigh' } } } }))
   on('env.get', ($: unknown, e: { name: string }) => ({ value: e.name === 'HOME' ? HOME : undefined }))
   on('fs.exists', ($: unknown, e: { path: string }) => ({ value: e.path in files || (!!env.devHold && e.path.endsWith('.statusline-dev-hold')) }))
   on('fs.read', ($: unknown, e: { path: string }) => (e.path in files ? { value: files[e.path] } : { deny: 'ENOENT' }))
@@ -56,6 +56,13 @@ test('the footer line carries the session figures, with the model\'s own effort'
   expect(line).toContain('↑49.6k/1.0M')
   expect(line).toContain('$0.11')
   expect(line).toContain('2h00')
+})
+
+test("another model's effort setting is not this model's", async ($, on) => {
+  stubSession(on, { settingsRead: { effortLevel: 'medium', modelSettings: { 'claude-opus-5': { effortLevel: 'xhigh' } } } })
+  await start($)
+  const line = await lineOf(await $.ui.mount(SESSION_MODE(200)))
+  expect(line).toContain('Opus 5.5 │ medium')
 })
 
 test('the engine\'s own modes stay, on the left', async ($, on) => {

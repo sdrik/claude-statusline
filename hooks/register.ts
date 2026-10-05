@@ -67,13 +67,16 @@ async function readGit($: EngineInterface): Promise<void> {
   }
 }
 
-/** Before the first request: the model's own setting, else the session's. */
+/**
+ * Before the first request: the model's own setting, else the session's.
+ * `/effort` keys modelSettings by the exact model id, so `claude-opus-5` is
+ * another model than `claude-opus-5-5`, not a prefix of it.
+ */
 async function readEffort($: EngineInterface): Promise<void> {
   try {
     const s = (await $.settings.read()) as { effortLevel?: string; modelSettings?: Record<string, { effortLevel?: string }> }
-    const model = await $.session.model()
-    const key = Object.keys(s.modelSettings ?? {}).filter(k => model.startsWith(k)).sort((a, b) => b.length - a.length)[0]
-    effort = (key && s.modelSettings?.[key]?.effortLevel) || s.effortLevel || effort
+    const model = (await $.session.model()).replace(/\[.*\]$/, '')
+    effort = s.modelSettings?.[model]?.effortLevel || s.effortLevel || effort
   } catch {}
 }
 

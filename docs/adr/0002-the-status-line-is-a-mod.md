@@ -88,8 +88,9 @@ beyond the documentation.
   in `$.store` under it is drawn again after `claude --resume`.
 - **`$.session.repo()` has no branch and no dirty state**; git is asked through
   `$.process.run`.
-- **Effort before the first request** is `settings.modelSettings[<model id
-  prefix>].effortLevel`, else `settings.effortLevel`.
+- **Effort before the first request** is `settings.modelSettings[<model
+  id>].effortLevel`, keyed by the exact id (`claude-opus-5` is another model
+  than `claude-opus-5-5`), else `settings.effortLevel`.
 
 ## Consequences
 
