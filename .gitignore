@@ -1,4 +1,6 @@
 .claude/settings.local.json
+# Written by Claude Code for its own version whenever it loads the checkout.
+.claude-plugin/types/
 .statusline-dev-hold
 # Working note, superseded by docs/adr/0001-*: kept out of the repo on purpose,
 # since its "Researched facts" section is false in three places.
