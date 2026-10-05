@@ -1,6 +1,6 @@
 # 1. Installation is owned by the SessionStart hook
 
-Status: accepted (2026-09-11, statusline 2.0.0, unreleased)
+Status: superseded by [0002](0002-the-status-line-is-a-mod.md) (statusline 3.0.0). Accepted 2026-09-11, statusline 2.0.0.
 
 ## Context
 

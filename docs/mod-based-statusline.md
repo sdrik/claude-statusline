@@ -1,3 +1,6 @@
+> Superseded by [ADR 0002](adr/0002-the-status-line-is-a-mod.md): this note judged
+> the spike's `AbovePrompt` band; 3.0.0 draws in `SessionMode` instead.
+
 # Can this status line be a Claude Code mod?
 
 Investigated 2026-09-17 against Claude Code **2.1.274**, with a working spike.

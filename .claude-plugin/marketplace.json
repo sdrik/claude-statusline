@@ -1,11 +1,14 @@
 {
   "name": "claude-statusline",
-  "owner": { "name": "Cédric Schieli", "email": "cschieli@gmail.com" },
+  "owner": {
+    "name": "Cédric Schieli",
+    "email": "cschieli@gmail.com"
+  },
   "plugins": [
     {
       "name": "statusline",
       "source": ".",
-      "description": "Installs a rich Claude Code status line: email, mode, model, effort, context gauge, agent-loop turn counter, and 5h/7d rate-limit gauges."
+      "description": "A rich Claude Code status line drawn by a mod: model, effort, context gauge, request counter, cost and 5h/7d rate-limit gauges in the footer, a summary under each turn, and a toast when a threshold is crossed."
     }
   ]
 }

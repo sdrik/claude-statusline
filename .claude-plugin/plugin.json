@@ -1,8 +1,55 @@
 {
   "name": "statusline",
-  "description": "Installs a rich Claude Code status line: email, mode, model, effort, context gauge, agent-loop turn counter, and 5h/7d rate-limit gauges.",
-  "version": "2.0.0",
-  "author": { "name": "Cédric Schieli", "email": "cschieli@gmail.com" },
+  "description": "A rich Claude Code status line drawn by a mod: model, effort, context gauge, request counter, cost and 5h/7d rate-limit gauges in the footer, a summary under each turn, and a toast when a threshold is crossed.",
+  "version": "3.0.0",
+  "author": {
+    "name": "Cédric Schieli",
+    "email": "cschieli@gmail.com"
+  },
   "license": "MIT",
-  "keywords": ["statusline", "status-line", "context", "rate-limit", "turns"]
+  "keywords": [
+    "statusline",
+    "status-line",
+    "context",
+    "rate-limit",
+    "mod"
+  ],
+  "userConfig": {
+    "ctx_warn": {
+      "type": "number",
+      "title": "Context warning (tokens)",
+      "description": "The context gauge turns yellow, and a toast fires, at this many input tokens.",
+      "default": 100000
+    },
+    "ctx_crit": {
+      "type": "number",
+      "title": "Context critical (tokens)",
+      "description": "The context gauge turns red at this many input tokens; it is also the gauge's full scale.",
+      "default": 200000
+    },
+    "turns_min": {
+      "type": "number",
+      "title": "Request counter: green up to",
+      "description": "The request counter stays green up to this many requests.",
+      "default": 30
+    },
+    "turns_max": {
+      "type": "number",
+      "title": "Request counter: red from",
+      "description": "The request counter is fully red from this many requests.",
+      "default": 250
+    },
+    "show_email": {
+      "type": "boolean",
+      "title": "Show email",
+      "description": "Show the signed-in account's email at the start of the line.",
+      "default": false
+    },
+    "show_git": {
+      "type": "boolean",
+      "title": "Show git branch",
+      "description": "Show the current branch, and a dot when the working tree has changes.",
+      "default": false
+    }
+  }
 }
