@@ -3,6 +3,7 @@ import {
   type Alerted, type Run, type Thresholds, type TurnSummary,
   alerts, alertedFor, ctxTier, fit, rampColor, summaryRuns,
 } from './line.js'
+import { dockedColumns, registerContextPane } from './context-pane.js'
 import { classify, sha256, withoutStatusLine } from './migrate.js'
 
 // Where each figure goes, and why, is ADR 0002. The engine facts this module
@@ -146,6 +147,7 @@ const style = (r: Run) => ({
 
 export const register: Register = (on, options) => {
   cfg = { ...DEFAULTS, ...(options as Partial<typeof DEFAULTS>) }
+  registerContextPane(on)
 
   on('session.start', async ($, e, next) => {
     measured = fromUsage(await $.session.usage())
@@ -157,6 +159,8 @@ export const register: Register = (on, options) => {
     $.ui.invalidate('ui.render')
     await pruneSummaries($, await $.clock.now())
     await migrate($)
+    // Served by context-pane.ts, the pane's module, which the footer's ⊞ runs
+    await $.command.register({ name: 'ctx', description: 'Ouvre ou ferme le pane du contexte (grille de /context)', immediate: true })
     return next(e)
   })
 
@@ -226,15 +230,19 @@ export const register: Register = (on, options) => {
 
   // The permanent line, right of the footer; the engine's own modes stay on its left
   on('ui.render', { component: 'SessionMode' }, async ($, e, next) => {
-    const { Box, Text } = $.ui.resolve(e)
+    const { Box, Text, Button } = $.ui.resolve(e)
     const modes = e.props.modes.length ? [await next(e), Text({ dimColor: true, children: [' │ '] })] : []
     const modesWidth = e.props.modes.length ? e.props.modes.join(' & ').length + 3 : 0
+    // The footer spans the docked pane too, though its viewport stops at the transcript
+    const docked = (await $.ui.panes()).some(p => p.isShown) ? dockedColumns() : 0
     const runs = fit({
       model: await $.session.model(), effort, email: cfg.show_email ? email : null, git: cfg.show_git ? git : null,
       tokens: measured.tokens, window: measured.window, requests, costUsd: measured.costUsd,
       rateLimits: measured.rateLimits, now: await $.clock.now(),
-    }, cfg, available(e.viewport?.columns ?? 120) - modesWidth)
-    return Box({ flexDirection: 'row', flexWrap: 'nowrap', children: [...modes, ...runs.map(r => Text({ ...style(r), children: [r.text] }))] })
+    }, cfg, available(e.viewport?.columns ?? 120) + docked - modesWidth)
+    return Box({ flexDirection: 'row', flexWrap: 'nowrap', children: [...modes, ...runs.map(r => r.press
+      ? Button({ key: 'press:' + r.press, plain: true, label: r.text, ...(r.dim ? { dimColor: true } : {}), onPress: () => void $.command.run({ command: r.press! }).catch(() => {}) })
+      : Text({ ...style(r), children: [r.text] }))] })
   })
 
   // Passed through: measured only, because SessionMode shares its row

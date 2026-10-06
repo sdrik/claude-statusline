@@ -13,7 +13,7 @@ const SESSION_MODE = (columns: number, modes: string[] = []) => ({
   viewport: { columns, rows: 40 }, props: { modes },
 }) as const
 
-type Env = { settings?: string; files?: Record<string, string>; usage?: unknown; devHold?: boolean; settingsRead?: object }
+type Env = { panes?: object[]; settings?: string; files?: Record<string, string>; usage?: unknown; devHold?: boolean; settingsRead?: object }
 
 /** Answers every call session.start makes; returns what the mod wrote and toasted. */
 function stubSession(on: any, env: Env = {}) {
@@ -37,6 +37,7 @@ function stubSession(on: any, env: Env = {}) {
   on('store.keys', () => ({ value: [...store.keys()] }))
   on('store.delete', ($: unknown, e: { key: string }) => (store.delete(e.key), { value: undefined }))
   on('ui.toast', ($: unknown, e: { text: string }) => (toasts.push(e.text), { value: undefined }))
+  on('ui.panes', () => ({ value: env.panes ?? [] }))
   const passed: Record<string, any> = {}
   on('ui.render', ($: unknown, e: { component: string; props: unknown }) => ((passed[e.component] = e.props), { type: 'Text', props: {}, children: ['engine'] }))
   return { written, toasts, store, passed, setUsage: (u: object) => void (usage = u) }
@@ -98,6 +99,28 @@ test('/clear empties the context gauge before the next response', async ($, on) 
   const line = await lineOf(await $.ui.mount(SESSION_MODE(200)))
   expect(line).toContain('0%')
   expect(line).toContain('↑0/1.0M')
+})
+
+test('the ⊞ beside the context gauge runs /ctx, which opens the pane', async ($, on) => {
+  stubSession(on)
+  const opened: string[] = []
+  on('command.register', ($: unknown, e: { name: string }) => ({ value: { command: e.name } }))
+  on('ui.open', ($: unknown, e: { id: string }) => (opened.push(e.id), { value: { isPlaced: true } }))
+  await start($)
+  const ui = await $.ui.mount(SESSION_MODE(200))
+  expect(await ui.find({ type: 'Button', key: 'press:ctx' })).toBeDefined()
+  await ui.press({ key: 'press:ctx' })
+  expect(opened).toEqual(['context'])
+})
+
+test('a docked pane gives its width back to the footer, which spans it', async ($, on) => {
+  stubSession(on, { panes: [{ id: 'context', title: 'Contexte', isShown: true, isFocused: false, isPlaced: true }] })
+  await start($)
+  await $.ui.mount({ plugin: 'statusline', surface: 'terminal', component: 'Pane', requestId: 'context', viewport: { columns: 146, rows: 40 },
+    props: { title: 'Contexte', isFocused: false, bodyColumns: 89, placement: 'dock' } } as any)
+  const line = await lineOf(await $.ui.mount(SESSION_MODE(146)))
+  expect(line).toContain('Opus 5.5')
+  expect(line).toContain('/1.0M')
 })
 
 test("2.0.0's statusLine entry is removed, the rest of settings.json kept", async ($, on) => {
