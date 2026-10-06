@@ -182,3 +182,29 @@ test('a turn counts its requests live and leaves its summary beside its duration
   expect(JSON.stringify(texts)).toContain('⟳ 2')
   expect(JSON.stringify(texts)).toContain('$0.12')
 })
+
+test('on the desktop the line is the band above the prompt, its gauges drawings, the footer left to the desktop', async ($, on) => {
+  stubSession(on)
+  await start($)
+  const footer = await $.ui.mount({ ...SESSION_MODE(200), surface: 'desktop' } as any)
+  expect(JSON.stringify(await footer.drawn())).toContain('engine')
+  const band = await $.ui.mount({
+    plugin: 'statusline', component: 'AbovePrompt', surface: 'desktop', requestId: 'AbovePrompt', viewport: { columns: 120, rows: 40 },
+    props: { hasSurvey: false, isWorking: false, maxRows: 10, bodyColumns: 120, scroll: { bodyRows: 9 } },
+  } as any)
+  const drawn = JSON.stringify(await band.drawn())
+  expect(await band.find({ type: 'Svg' })).toBeTruthy()
+  expect(drawn).toContain('↑49.6k')
+  expect(drawn).toContain('$0.11')
+  expect(drawn).not.toContain('Opus')
+  expect(drawn).not.toContain('xhigh')
+})
+
+test('the band yields to a survey, and stays the engine\'s on the terminal', async ($, on) => {
+  stubSession(on)
+  await start($)
+  const props = { hasSurvey: true, isWorking: false, maxRows: 10, bodyColumns: 120, scroll: { bodyRows: 9 } }
+  const at = (surface: string, p: object) => $.ui.mount({ plugin: 'statusline', component: 'AbovePrompt', surface, requestId: 'AbovePrompt', viewport: { columns: 120, rows: 40 }, props: p } as any)
+  expect(JSON.stringify(await (await at('desktop', props)).drawn())).not.toContain('↑')
+  expect(JSON.stringify(await (await at('terminal', { ...props, hasSurvey: false })).drawn())).not.toContain('↑')
+})

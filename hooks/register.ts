@@ -1,13 +1,14 @@
 import type { EngineInterface, Register } from 'claude-code'
 import {
   type Alerted, type Run, type Thresholds, type TurnSummary,
-  alerts, alertedFor, ctxTier, fit, rampColor, summaryRuns,
+  type Piece, alerts, alertedFor, barSvg, ctxTier, fit, rampColor, summaryRuns, thirds,
 } from './line.js'
 import { dockedColumns, registerContextPane } from './context-pane.js'
 import { classify, sha256, withoutStatusLine } from './migrate.js'
 
 // Where each figure goes, and why, is ADR 0002. The engine facts this module
 // works around are recorded there too.
+
 
 type Measured = {
   tokens: number
@@ -145,6 +146,21 @@ const style = (r: Run) => ({
   ...(r.bold ? { bold: true as const } : {}),
 })
 
+async function figures($: EngineInterface) {
+  return {
+    model: await $.session.model(), effort, email: cfg.show_email ? email : null, git: cfg.show_git ? git : null,
+    tokens: measured.tokens, window: measured.window, requests, costUsd: measured.costUsd,
+    rateLimits: measured.rateLimits, now: await $.clock.now(),
+  }
+}
+
+type Leaves = Pick<ReturnType<EngineInterface['ui']['resolve']>, 'Text' | 'Button'>
+
+/** A run as a Text, or as the Button running the slash command it names. */
+const run = ($: EngineInterface, { Text, Button }: Leaves, r: Run) => r.press
+  ? Button({ key: 'press:' + r.press, plain: true, label: r.text, ...(r.dim ? { dimColor: true } : {}), onPress: () => void $.command.run({ command: r.press! }).catch(() => {}) })
+  : Text({ ...style(r), children: [r.text] })
+
 export const register: Register = (on, options) => {
   cfg = { ...DEFAULTS, ...(options as Partial<typeof DEFAULTS>) }
   registerContextPane(on)
@@ -228,21 +244,35 @@ export const register: Register = (on, options) => {
     return out
   })
 
-  // The permanent line, right of the footer; the engine's own modes stay on its left
+  // The permanent line, right of the footer; the engine's own modes stay on its left.
+  // The desktop's footer is too narrow for it: there it is the band above the prompt.
   on('ui.render', { component: 'SessionMode' }, async ($, e, next) => {
+    if (e.surface === 'desktop') return next(e)
     const { Box, Text, Button } = $.ui.resolve(e)
     const modes = e.props.modes.length ? [await next(e), Text({ dimColor: true, children: [' │ '] })] : []
     const modesWidth = e.props.modes.length ? e.props.modes.join(' & ').length + 3 : 0
     // The footer spans the docked pane too, though its viewport stops at the transcript
     const docked = (await $.ui.panes()).some(p => p.isShown) ? dockedColumns() : 0
-    const runs = fit({
-      model: await $.session.model(), effort, email: cfg.show_email ? email : null, git: cfg.show_git ? git : null,
-      tokens: measured.tokens, window: measured.window, requests, costUsd: measured.costUsd,
-      rateLimits: measured.rateLimits, now: await $.clock.now(),
-    }, cfg, available(e.viewport?.columns ?? 120) + docked - modesWidth)
-    return Box({ flexDirection: 'row', flexWrap: 'nowrap', children: [...modes, ...runs.map(r => r.press
-      ? Button({ key: 'press:' + r.press, plain: true, label: r.text, ...(r.dim ? { dimColor: true } : {}), onPress: () => void $.command.run({ command: r.press! }).catch(() => {}) })
-      : Text({ ...style(r), children: [r.text] }))] })
+    const runs = fit(await figures($), cfg, available(e.viewport?.columns ?? 120) + docked - modesWidth)
+    return Box({ flexDirection: 'row', flexWrap: 'nowrap', children: [...modes, ...runs.map(r => run($, { Text, Button }, r))] })
+  })
+
+  // The desktop's line: its footer shows the model and the effort, and only the
+  // band draws an Svg beside Texts, so its gauges are drawings
+  on('ui.render', { component: 'AbovePrompt' }, async ($, e, next) => {
+    if (e.surface !== 'desktop' || e.props.hasSurvey) return next(e)
+    const els = $.ui.resolve(e), { Box, Text, Button } = els
+    if (!('Svg' in els)) return next(e)
+    const { left, centre, right } = thirds(await figures($), cfg, e.props.bodyColumns, { bars: true, model: false })
+    const draw = (p: Piece) => ('bar' in p ? els.Svg({ ...barSvg(p.bar), alt: p.bar.alt }) : run($, { Text, Button }, p))
+    // The sides grow from nothing alike, so the centre is the band's
+    const side = (ps: Piece[], justifyContent: 'flex-start' | 'flex-end') =>
+      Box({ flexDirection: 'row', flexWrap: 'nowrap', alignItems: 'center', width: 0, flexGrow: 1, justifyContent, children: ps.map(draw) })
+    return Box({ flexDirection: 'row', flexWrap: 'nowrap', alignItems: 'center', columnGap: 2, children: [
+      side(left, 'flex-start'),
+      Box({ flexDirection: 'row', flexShrink: 0, alignItems: 'center', children: centre.map(draw) }),
+      side(right, 'flex-end'),
+    ] })
   })
 
   // Passed through: measured only, because SessionMode shares its row

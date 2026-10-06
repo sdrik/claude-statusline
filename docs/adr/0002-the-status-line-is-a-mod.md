@@ -92,6 +92,45 @@ beyond the documentation.
   id>].effortLevel`, keyed by the exact id (`claude-opus-5` is another model
   than `claude-opus-5-5`), else `settings.effortLevel`.
 
+### On the desktop (Claude Code 2.1.291)
+
+- **`e.surface` says where a tree is drawn**, and only it does: the table
+  `$.ui.resolve(e)` hands out carries every element's name, so `'Svg' in els`
+  holds on the terminal too.
+- **The desktop's footer draws the model and the effort itself**, to the right
+  of `SessionMode`, and leaves it about forty characters: the line is drawn in
+  `AbovePrompt` there, leaving both out, and `SessionMode` is the engine's.
+- **Adjacent `Text`s are drawn apart**, so a gauge made of background-coloured
+  runs splits (`3 2%`). The desktop's gauges are one `Svg` each.
+- **Where an `Svg` is drawn**: `AbovePrompt` draws one beside `Text`s, and the
+  pane one alone in its column; `SessionMode` draws none. The pane's legend
+  squares, beside `Text`s with an empty `alt`, kept their place undrawn —
+  whether the row or the empty `alt` did it is untested.
+- **`Svg` cannot paint theme keys**, and nothing resolves a key to a colour
+  (`ThemeKey` names keys, never values): the grid paints /context's keys in the
+  colours the desktop's dark theme gave them, sampled from a screenshot. The
+  legend's squares are a `■` coloured by key.
+- **`Box`es with a background** are drawn a full line tall: as squares they
+  read as bars.
+- **`Button` is a leaf with a `label`**, and `Box` takes no `onPress`: a drawing
+  cannot be made pressable, so `⊞` stays beside the gauge. The desktop's footer
+  drew it first, out of order; the band draws it in place.
+- **/context's glyphs (`⛀⛁⛶⛝`) draw as pictograms** in the desktop's font.
+- **The desktop's built-in MCP servers are named by an id** (`1a59c906-…`, the
+  engine's `x-mcp-server-id`), in /mcp as in the breakdown, with no display
+  name anywhere: the pane names them by their first tools.
+- **A press misses after a quick run of redraws.** A `Button`'s handle lives
+  as long as the drawing it is in; after two redraws a few ms apart, the
+  desktop keeps showing a tree whose handles the engine has retired, answers
+  `ui_press not handled`, asks for a fresh drawing, and the next press lands.
+  The pane writes once per press, shows `Calcul…` only past 300 ms, and sends
+  its docked width (a redraw) on the terminal alone.
+- **A blur is such a redraw**: a pressed `Button` gone from the next tree takes
+  the pane's focus with it, and `isFocused` flipping redraws. The pane's view
+  toggle is one `Button` under one key in every state, and the band's `⊞`
+  opens the pane with `focus` on the desktop: unfocused, its first press missed.
+- **`TurnDuration` is raised on the terminal alone**, per its declaration.
+
 ## Consequences
 
 - Updating the plugin updates the line, in the running session on reload. The

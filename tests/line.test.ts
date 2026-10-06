@@ -1,5 +1,5 @@
 import { expect, test } from 'claude-code/testing'
-import { type Figures, alerts, alertedFor, fit, gauge, modelName, rampColor, timeLeft, tokens, width } from '../hooks/line.js'
+import { type Figures, type Piece, alerts, barSvg, thirds, alertedFor, fit, gauge, modelName, rampColor, timeLeft, tokens, width } from '../hooks/line.js'
 
 const T = { ctx_warn: 100000, ctx_crit: 200000, turns_min: 30, turns_max: 250 }
 const NOW = Date.parse('2026-10-05T12:00:00Z')
@@ -88,4 +88,33 @@ test('a threshold re-arms once the figure falls back', () => {
   const low = alerts({ tokens: 1000, rateLimits: [] }, high, T)
   expect(low.text).toBe('')
   expect(alerts({ tokens: 120000, rateLimits: [] }, low.now, T).text).toBe('🟧 Contexte ≥ 100.0k')
+})
+
+const BAND = { bars: true, model: false } as const
+const shown = (pieces: Piece[]) => pieces.map(p => ('bar' in p ? `[${p.bar.alt}]` : p.text)).join('')
+
+test("the desktop's line draws its gauges as bars and leaves the model and the effort to the desktop", () => {
+  const line = shown(fit(FIGURES, T, 200, BAND))
+  expect(line).toBe('me@example.com │ main ● │ [contexte 111.8k] ↑111.8k/1.0M ⊞ │ ⟳ 10 │ $1.94 │ [5h 2 %] 3h30 │ [7j 4 %] 4d 19h')
+  expect(fit(FIGURES, T, 200, BAND).some(p => !('bar' in p) && p.bg)).toBe(false)
+})
+
+test("the desktop's line fits its band as the terminal's does, a bar counting its cells", () => {
+  expect(shown(fit(FIGURES, T, 40, BAND))).toBe('[contexte 111.8k] ↑111.8k ⊞ │ [5h 2 %] │ [7j 4 %]')
+})
+
+test('a bar is one drawing, its fill in the tier colour and its percentage clamped', () => {
+  const b = (pct: number, tier: number, cells = 13) => barSvg({ pct, tier, cells, alt: '' })
+  expect(b(56, 1).source).toContain('fill="#af8700"')
+  expect(b(56, 1).source).toContain('>56%</text>')
+  expect(b(140, 2).source).toContain('>100%</text>')
+  expect(b(0, 0).source).not.toContain('#008700')
+  expect(b(5, 0, 5).width).toBe(40)
+})
+
+test("the desktop's band puts the context left, the cost in the centre and the limits right", () => {
+  const t = thirds(FIGURES, T, 200, BAND)
+  expect(shown(t.left)).toBe('me@example.com │ main ● │ [contexte 111.8k] ↑111.8k/1.0M ⊞ │ ⟳ 10')
+  expect(shown(t.centre)).toBe('$1.94')
+  expect(shown(t.right)).toBe('[5h 2 %] 3h30 │ [7j 4 %] 4d 19h')
 })

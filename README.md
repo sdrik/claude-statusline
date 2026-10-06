@@ -45,7 +45,8 @@ time to reset, rate-limit gauges, model. The context gauge and `⊞` never go.
 
 Claude Code **v2.1.289 or later**, in the terminal or the desktop app. Mods draw
 nothing in VS Code, in `claude -p`, or through the Agent SDK. The desktop app
-has no turn summary.
+has no turn summary, and draws the line in the band above the prompt, its
+gauges as bars, leaving the model and the effort to its own footer.
 
 ## Usage
 

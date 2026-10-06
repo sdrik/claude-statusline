@@ -84,19 +84,31 @@ export function gauge(pct: number, tier: number, cells: number): Run[] {
   return runs
 }
 
-type Segment = { id: Exclude<Drop, 'times' | 'rates'> | 'ctx' | 'rate'; runs: Run[]; time?: Run[] }
+/** A gauge drawn whole, as the desktop's Svg, `cells` wide: its runs would be split apart there. */
+export type Bar = { bar: { pct: number; tier: number; cells: number; alt: string } }
+export type Piece = Run | Bar
 
-function segments(f: Figures, t: Thresholds, compact: boolean): Segment[] {
+/**
+ * How a surface draws the line: `bars`, gauges as drawings; `model`, false where
+ * the surface shows the model and the effort itself.
+ */
+export type Style = { bars: boolean; model: boolean }
+const TERMINAL: Style = { bars: false, model: true }
+
+type Segment = { id: Exclude<Drop, 'times' | 'rates'> | 'ctx' | 'rate'; runs: Piece[]; time?: Run[] }
+
+function segments(f: Figures, t: Thresholds, compact: boolean, st: Style): Segment[] {
   const cells = compact ? 5 : 13, out: Segment[] = []
+  const meter = (pct: number, tier: number, alt: string): Piece[] => (st.bars ? [{ bar: { pct, tier, cells, alt } }] : gauge(pct, tier, cells))
   if (f.email) out.push({ id: 'email', runs: [{ text: f.email, color: 'cyan' }] })
   if (f.git) out.push({ id: 'git', runs: [{ text: f.git.branch, color: 'magenta' }, ...(f.git.dirty ? [{ text: ' ●', color: 'yellow' }] : [])] })
-  out.push({ id: 'model', runs: [{ text: modelName(f.model, compact), color: 'blue' }] })
-  if (f.effort != null) out.push({ id: 'effort', runs: [{ text: String(f.effort), color: 'yellow' }] })
+  if (st.model) out.push({ id: 'model', runs: [{ text: modelName(f.model, compact), color: 'blue' }] })
+  if (st.model && f.effort != null) out.push({ id: 'effort', runs: [{ text: String(f.effort), color: 'yellow' }] })
   const ct = ctxTier(f.tokens, t)
   const io = ' ↑' + tokens(f.tokens) + (compact || !f.window ? '' : '/' + tokens(f.window))
   // A glyph of its own opens /context's pane: a Button would take the gauge's colours
   out.push({ id: 'ctx', runs: [
-    ...gauge((f.tokens / t.ctx_crit) * 100, ct, cells), { text: io, color: tierColor(ct) }, { text: ' ' }, { text: '⊞', dim: true, press: 'ctx' },
+    ...meter((f.tokens / t.ctx_crit) * 100, ct, `contexte ${tokens(f.tokens)}`), { text: io, color: tierColor(ct) }, { text: ' ' }, { text: '⊞', dim: true, press: 'ctx' },
   ] })
   if (f.requests) out.push({ id: 'loops', runs: [{ text: `⟳ ${f.requests}`, color: rampColor(f.requests, t) }] })
   if (f.costUsd != null) out.push({ id: 'cost', runs: [{ text: '$' + f.costUsd.toFixed(2), color: 'green' }] })
@@ -104,40 +116,73 @@ function segments(f: Figures, t: Thresholds, compact: boolean): Segment[] {
     const r = f.rateLimits.find(x => x.kind === kind)
     if (!r) continue
     const tier = rateTier(Math.round(r.percentUsed)), left = timeLeft(r.resetsAt, f.now)
-    out.push({ id: 'rate', runs: gauge(r.percentUsed, tier, cells), time: left ? [{ text: ' ' + left, color: tierColor(tier) }] : [] })
+    const alt = `${kind === 'five_hour' ? '5h' : '7j'} ${Math.round(r.percentUsed)} %`
+    out.push({ id: 'rate', runs: meter(r.percentUsed, tier, alt), time: left ? [{ text: ' ' + left, color: tierColor(tier) }] : [] })
   }
   return out
 }
 
-function assemble(list: Segment[], dropped: ReadonlySet<Drop>): Run[] {
-  const runs: Run[] = []
-  const kept = list.filter(s => !dropped.has((s.id === 'rate' ? 'rates' : s.id) as Drop))
-  kept.forEach((s, i) => {
-    if (i) runs.push({ text: ' │ ', dim: true })
-    runs.push(...s.runs)
-    if (s.time && !dropped.has('times')) runs.push(...s.time)
-  })
-  return runs
+/** The kept segments, each with its pieces as drawn. */
+function keep(list: Segment[], dropped: ReadonlySet<Drop>): { id: Segment['id']; pieces: Piece[] }[] {
+  return list.filter(s => !dropped.has((s.id === 'rate' ? 'rates' : s.id) as Drop))
+    .map(s => ({ id: s.id, pieces: [...s.runs, ...(s.time && !dropped.has('times') ? s.time : [])] }))
 }
 
-export const width = (runs: readonly Run[]): number => runs.reduce((n, r) => n + [...r.text].length, 0)
+const join = (parts: { pieces: Piece[] }[]): Piece[] =>
+  parts.flatMap((s, i) => (i ? [{ text: ' │ ', dim: true }, ...s.pieces] : s.pieces))
+
+const assemble = (list: Segment[], dropped: ReadonlySet<Drop>): Piece[] => join(keep(list, dropped))
+
+export const width = (runs: readonly Piece[]): number => runs.reduce((n, r) => n + ('bar' in r ? r.bar.cells : [...r.text].length), 0)
 
 /**
  * The line for `avail` columns: full forms, then compact forms, then segments
  * dropped in DROP_ORDER. The context gauge, ↑input and ⊞ are never dropped, so the
  * result can still exceed a very small `avail`.
  */
-export function fit(f: Figures, t: Thresholds, avail: number): Run[] {
-  const full = assemble(segments(f, t, false), new Set())
-  if (width(full) <= avail) return full
-  const compact = segments(f, t, true), dropped = new Set<Drop>()
-  let runs = assemble(compact, dropped)
+export function fit(f: Figures, t: Thresholds, avail: number, st: Style & { bars: true }): Piece[]
+export function fit(f: Figures, t: Thresholds, avail: number, st?: Style & { bars: false }): Run[]
+export function fit(f: Figures, t: Thresholds, avail: number, st: Style = TERMINAL): Piece[] {
+  return join(choose(f, t, avail, st))
+}
+
+function choose(f: Figures, t: Thresholds, avail: number, st: Style) {
+  const full = segments(f, t, false, st)
+  if (width(assemble(full, new Set())) <= avail) return keep(full, new Set())
+  const compact = segments(f, t, true, st), dropped = new Set<Drop>()
   for (const d of DROP_ORDER) {
-    if (width(runs) <= avail) break
+    if (width(assemble(compact, dropped)) <= avail) break
     dropped.add(d)
-    runs = assemble(compact, dropped)
   }
-  return runs
+  return keep(compact, dropped)
+}
+
+/**
+ * The line fitted as `fit` does, split for a band: the context and what
+ * precedes it on the left, the cost in the centre, the rate limits on the right.
+ */
+export function thirds(f: Figures, t: Thresholds, avail: number, st: Style): { left: Piece[]; centre: Piece[]; right: Piece[] } {
+  const kept = choose(f, t, avail, st)
+  return {
+    left: join(kept.filter(s => s.id !== 'cost' && s.id !== 'rate')),
+    centre: join(kept.filter(s => s.id === 'cost')),
+    right: join(kept.filter(s => s.id === 'rate')),
+  }
+}
+
+const BAR_H = 14
+/** A bar's width in pixels for its `cells`: wide enough for `100%` when compact. */
+export const barWidth = (cells: number): number => Math.max(40, Math.round(cells * 6.5))
+
+/** The bar's markup: the fill in its tier's colour, the percentage centred, legible on either theme. */
+export function barSvg(b: Bar['bar']): { source: string; width: number; height: number } {
+  const w = barWidth(b.cells), p = Math.min(100, Math.max(0, Math.round(b.pct))), fill = Math.round((p / 100) * w)
+  const source = `<svg xmlns="http://www.w3.org/2000/svg" width="${w}" height="${BAR_H}" viewBox="0 0 ${w} ${BAR_H}">`
+    + `<rect width="${w}" height="${BAR_H}" rx="3" fill="rgba(128,128,128,0.25)"/>`
+    + (fill ? `<rect width="${fill}" height="${BAR_H}" rx="3" fill="${GAUGE_BG[b.tier]}"/>` : '')
+    + `<text x="${w / 2}" y="${BAR_H / 2}" dy="0.35em" text-anchor="middle" font-family="system-ui,sans-serif" font-size="10" font-weight="700"`
+    + ` fill="#ffffff" stroke="rgba(0,0,0,0.45)" stroke-width="2" paint-order="stroke">${p}%</text></svg>`
+  return { source, width: w, height: BAR_H }
 }
 
 export type TurnSummary = { dCtx: number; tier: number; out: number; steps: number; dCost: number }
