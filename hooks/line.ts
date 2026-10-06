@@ -3,8 +3,11 @@
 
 export type Thresholds = { ctx_warn: number; ctx_crit: number; turns_min: number; turns_max: number }
 
-/** One styled stretch of text; the engine draws each as a Text. */
-export type Run = { text: string; color?: string; bg?: string; bold?: boolean; dim?: boolean }
+/**
+ * One styled stretch of text; the engine draws each as a Text, or as a Button
+ * running the slash command `press` names, which draws no colour but `dim`.
+ */
+export type Run = { text: string; color?: string; bg?: string; bold?: boolean; dim?: boolean; press?: string }
 
 export type RateLimit = { kind: string; percentUsed: number; resetsAt?: string }
 
@@ -91,7 +94,10 @@ function segments(f: Figures, t: Thresholds, compact: boolean): Segment[] {
   if (f.effort != null) out.push({ id: 'effort', runs: [{ text: String(f.effort), color: 'yellow' }] })
   const ct = ctxTier(f.tokens, t)
   const io = ' ↑' + tokens(f.tokens) + (compact || !f.window ? '' : '/' + tokens(f.window))
-  out.push({ id: 'ctx', runs: [...gauge((f.tokens / t.ctx_crit) * 100, ct, cells), { text: io, color: tierColor(ct) }] })
+  // A glyph of its own opens /context's pane: a Button would take the gauge's colours
+  out.push({ id: 'ctx', runs: [
+    ...gauge((f.tokens / t.ctx_crit) * 100, ct, cells), { text: io, color: tierColor(ct) }, { text: ' ' }, { text: '⊞', dim: true, press: 'ctx' },
+  ] })
   if (f.requests) out.push({ id: 'loops', runs: [{ text: `⟳ ${f.requests}`, color: rampColor(f.requests, t) }] })
   if (f.costUsd != null) out.push({ id: 'cost', runs: [{ text: '$' + f.costUsd.toFixed(2), color: 'green' }] })
   for (const kind of ['five_hour', 'seven_day']) {
@@ -118,7 +124,7 @@ export const width = (runs: readonly Run[]): number => runs.reduce((n, r) => n +
 
 /**
  * The line for `avail` columns: full forms, then compact forms, then segments
- * dropped in DROP_ORDER. The context gauge and ↑input are never dropped, so the
+ * dropped in DROP_ORDER. The context gauge, ↑input and ⊞ are never dropped, so the
  * result can still exceed a very small `avail`.
  */
 export function fit(f: Figures, t: Thresholds, avail: number): Run[] {

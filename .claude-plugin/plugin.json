@@ -7,6 +7,7 @@
     "email": "cschieli@gmail.com"
   },
   "license": "MIT",
+  "types": "./types/index.d.ts",
   "keywords": [
     "statusline",
     "status-line",

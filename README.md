@@ -9,13 +9,14 @@ Each figure sits where it reads best:
 - **Footer, right of the hint line** (always there):
 
   ```
-  focus │ email │ branch ● │ Opus 5.5 │ xhigh │ ███ 25% ░░░ ↑49.5k/1.0M │ ⟳ 12 │ $0.84 │ █ 6% ░ 2h16 │ █ 5% ░ 4d 17h
+  focus │ email │ branch ● │ Opus 5.5 │ xhigh │ ███ 25% ░░░ ↑49.5k/1.0M ⊞ │ ⟳ 12 │ $0.84 │ █ 6% ░ 2h16 │ █ 5% ░ 4d 17h
   ```
 
   - the engine's own modes (`focus`, `memory paused`), kept on the left
   - **email** and **git branch** with a dot when the tree has changes, both off by default
   - **model** and **effort**
-  - **context gauge** on the absolute token scale, with `↑input/window` in the same colour
+  - **context gauge** on the absolute token scale, with `↑input/window` in the same colour,
+    and **`⊞`**, which opens the context pane
   - **`⟳ N`**, the model requests of the main loop, on a green→red gradient
   - **total cost** of the session
   - **5-hour and 7-day rate-limit gauges**, each with the time until reset
@@ -24,6 +25,11 @@ Each figure sits where it reads best:
 - **Under each turn**, beside `Baked for 14s`: `↑+12.3k ↓1.9k · ⟳ 4 · $0.12`,
   what that turn added to the context, its output tokens, its requests and its
   cost. It is kept, and comes back after `claude --resume`.
+- **Context pane**, opened and closed by a click on `⊞` or by `/ctx`: the grid
+  and categories of `/context`, kept live, from a local estimate. **Détail**
+  counts them with the token-count API, as `/context` does, and adds the memory
+  files, MCP servers, agents, skills and slash commands; that count is taken
+  only on demand and kept until **Rafraîchir**.
 - **Toast**, when a threshold is crossed upward: `🟧 Contexte ≥ 100.0k`,
   `🟥 Contexte ≥ 200.0k`, `🟥 5h ≥ 80 %`.
 
@@ -33,7 +39,7 @@ above. The context gauge and the request counter tier differently — see
 
 When the terminal narrows, the line switches to compact forms (shorter gauges,
 `O5.5`, `↑49.5k`), then drops, in this order: email, git, `⟳`, effort, cost,
-time to reset, rate-limit gauges, model. The context gauge never goes.
+time to reset, rate-limit gauges, model. The context gauge and `⊞` never go.
 
 ## Requirements
 

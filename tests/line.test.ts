@@ -47,7 +47,7 @@ test('the request ramp runs green to red between its bounds', () => {
 test('a wide line carries every figure in full', () => {
   const line = text(fit(FIGURES, T, 300))
   expect(line).toBe(
-    'me@example.com │ main ● │ Opus 5.5 │ medium │      56%      ↑111.8k/1.0M │ ⟳ 10 │ $1.94 │      2%       3h30 │      4%       4d 19h',
+    'me@example.com │ main ● │ Opus 5.5 │ medium │      56%      ↑111.8k/1.0M ⊞ │ ⟳ 10 │ $1.94 │      2%       3h30 │      4%       4d 19h',
   )
 })
 
@@ -56,10 +56,10 @@ test('a narrower line goes compact before it drops anything', () => {
   const line = text(fit(FIGURES, T, full - 1))
   expect(line).toContain('me@example.com')
   expect(line).toContain('O5.5')
-  expect(line).toContain('↑111.8k │')
+  expect(line).toContain('↑111.8k ⊞ │')
 })
 
-test('segments drop in the agreed order, and the context block never goes', () => {
+test('segments drop in the agreed order, and the context block and its ⊞ never go', () => {
   const seen: string[] = []
   for (let avail = 200; avail >= 0; avail--) {
     const line = text(fit(FIGURES, T, avail))
@@ -67,6 +67,7 @@ test('segments drop in the agreed order, and the context block never goes', () =
       ['cost', /\$/], ['times', /3h30/], ['rates', /2%/], ['model', /Opus 5\.5|O5\.5/]]
     for (const [name, mark] of marks) if (!mark.test(line) && !seen.includes(name)) seen.push(name)
     expect(line).toContain('↑111.8k')
+    expect(line).toContain('⊞')
   }
   expect(seen).toEqual(['email', 'git', 'loops', 'effort', 'cost', 'times', 'rates', 'model'])
 })
