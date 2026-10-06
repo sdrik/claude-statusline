@@ -8,7 +8,7 @@
     {
       "name": "statusline",
       "source": ".",
-      "description": "A rich Claude Code status line drawn by a mod: model, effort, context gauge, request counter, cost and 5h/7d rate-limit gauges in the footer, a summary under each turn, and a toast when a threshold is crossed."
+      "description": "A rich Claude Code status line drawn by a mod: model, effort, context gauge, request counter, cost and 5h/7d rate-limit gauges in the footer, a summary under each turn, a toast when a threshold is crossed, and /context's breakdown in a pane opened from the footer."
     }
   ]
 }
