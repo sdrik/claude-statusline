@@ -1,7 +1,7 @@
 {
   "name": "statusline",
   "description": "A rich Claude Code status line drawn by a mod: model, effort, context gauge, request counter, cost and 5h/7d rate-limit gauges in the footer, a summary under each turn, a toast when a threshold is crossed, and /context's breakdown in a pane opened from the footer.",
-  "version": "3.2.0",
+  "version": "3.2.1",
   "author": {
     "name": "Cédric Schieli",
     "email": "cschieli@gmail.com"
