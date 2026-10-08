@@ -5,8 +5,12 @@ import type { ContextBreakdown } from '../types'
 
 /** How a square is filled, for a surface that draws it as a shape rather than its glyph. */
 export type Square = 'full' | 'partial' | 'free' | 'buffer'
-/** One styled stretch of text; with `square`, one of /context's squares. */
-export type Span = { text: string; color?: string; dim?: boolean; bold?: boolean; square?: Square }
+/**
+ * One styled stretch of text; with `square`, one of /context's squares; with `blank`, a
+ * square's room left empty; with `figure`, a number set right in that column of the rows.
+ */
+export type Span = { text: string; color?: string; dim?: boolean; bold?: boolean; square?: Square; blank?: true; figure?: Figure }
+export type Figure = 'tokens' | 'share'
 export type Line = Span[]
 /** `id` stays put while `title` carries counts; `tokens` is the rows' sum. */
 export type Section = { id: string; title: string; tokens: number; rows: { label: string; tokens: number; dim?: boolean }[] }
@@ -78,12 +82,13 @@ export function legend(b: ContextBreakdown, isCounted: boolean): Line[] {
     [],
   ]
   for (const c of b.categories) {
-    if (c.kind === 'deferred') lines.push([{ text: `  ${c.name} : ${tokens(c.tokens)} (différé)`, dim: true }])
-    else lines.push([
-      { text: GLYPH[square(c.kind, 1)] + ' ', color: c.color, square: square(c.kind, 1) },
-      { text: c.name + ' : ' },
-      { text: `${tokens(c.tokens)} (${share(c.tokens, b.rawMaxTokens)})`, dim: true },
-    ])
+    const figures: Span[] = [
+      { text: tokens(c.tokens), dim: true, figure: 'tokens' },
+      // A deferred category's name already says so: its share cell stays, empty, holding the tokens' column
+      { text: c.kind === 'deferred' ? '' : `(${share(c.tokens, b.rawMaxTokens)})`, dim: true, figure: 'share' },
+    ]
+    if (c.kind === 'deferred') lines.push([{ text: '  ', blank: true }, { text: c.name, dim: true }, ...figures])
+    else lines.push([{ text: GLYPH[square(c.kind, 1)] + ' ', color: c.color, square: square(c.kind, 1) }, { text: c.name }, ...figures])
   }
   lines.push([], [{
     text: b.isAutoCompactEnabled && b.autoCompactThreshold != null

@@ -1,7 +1,7 @@
 import { atom, read, update } from 'claude-code'
 import type { EngineInterface, Register } from 'claude-code'
 import type { ContextBreakdown, ContextFull, ContextPane } from '../types'
-import { type Line, type Span, details, grid, gridSvg, legend, timeOfDay, tokens } from './context-view.js'
+import { type Figure, type Line, type Span, details, grid, gridSvg, legend, timeOfDay, tokens } from './context-view.js'
 
 // The pane /context would be, toggled by /ctx, which the mod's session.start
 // registers (an event takes one unmatched hook per plugin), and by a press on
@@ -11,8 +11,12 @@ import { type Line, type Span, details, grid, gridSvg, legend, timeOfDay, tokens
 // measure keeps it live.
 
 const PANE = 'context'
-// The details' rows: labels take what the numbers leave, numbers right-aligned
-const ROW_MAX = 64, NUM_W = 7
+// The details' rows span the pane: labels take what the numbers leave, numbers right-aligned
+const NUM_W = 7
+// The legend's figures: `863.4k` and `(100.0 %)`, each behind a gap; and its squares' room
+const FIGURE_W: Record<Figure, number> = { tokens: 7, share: 10 }, SQUARE_W = 2
+// The width from which /context draws its full grid, 10×10 (20×10 on a 1M window)
+const GRID_COLUMNS = 80
 
 // What the docked pane takes from the footer's row, its border included: the
 // footer's viewport, like the pane's own, is the transcript's width alone.
@@ -75,15 +79,19 @@ export function registerContextPane(on: Parameters<Register>[0]): void {
     const els = $.ui.resolve(e), { Box, Text, Button } = els
     // The desktop's font draws /context's glyphs as pictograms: its grid is a drawing
     const Svg = e.surface === 'desktop' && 'Svg' in els ? els.Svg : undefined
-    // Beside Texts an Svg is not drawn: the legend's squares are a geometric glyph
-    const span = (sp: Span) => Text({ ...style(sp), children: [Svg && sp.square ? '■ ' : sp.text] })
+    // Beside Texts an Svg is not drawn: the legend's squares are a geometric glyph. In a
+    // proportional font a box keeps a row without one aligned: the desktop paints `transparent` white
+    const span = (sp: Span) => Svg && (sp.square || sp.blank)
+      ? Box({ width: SQUARE_W, flexShrink: 0, children: sp.blank ? [] : [Text({ ...style(sp), children: ['■'] })] })
+      : Text({ ...style(sp), children: [sp.text] })
     // Only the terminal's footer spans the docked pane: elsewhere the redraw would be a press missed
     const width = e.surface === 'terminal' && e.props.placement === 'dock' ? e.props.bodyColumns + 1 : 0
     if (width !== docked) {
       docked = width
       $.ui.invalidate('ui.render')
     }
-    const columns = e.props.bodyColumns
+    // /context draws 5×5 under 80 columns, for its glyphs' width: a drawing has none to keep
+    const columns = Svg ? Math.max(GRID_COLUMNS, e.props.bodyColumns) : e.props.bodyColumns
     const { view: v, full: f } = await read($, pane), open = await read($, unfolded)
     const counted = v !== 'full' ? undefined : f.status === 'ready' ? f : f.status === 'busy' ? f.previous : undefined
     let shown: ContextBreakdown | undefined = counted?.breakdown
@@ -94,11 +102,15 @@ export function registerContextPane(on: Parameters<Register>[0]): void {
       } catch {}
     }
 
-    const lines =(ls: Line[]) => ls.map(l => Box({
+    // A row's figures close it, each right-aligned in its column: the label takes the room left
+    const figure = (sp: Span) => Box({ width: FIGURE_W[sp.figure!], flexShrink: 0, justifyContent: 'flex-end', children: [span(sp)] })
+    const lines = (ls: Line[]) => ls.map(l => Box({
       flexDirection: 'row',
-      children: l.length ? l.map(span) : [Text({ children: [' '] })],
+      children: !l.length ? [Text({ children: [' '] })]
+        : !l.some(sp => sp.figure) ? l.map(span)
+        : [Box({ flexDirection: 'row', flexGrow: 1, children: l.filter(sp => !sp.figure).map(span) }), ...l.filter(sp => sp.figure).map(figure)],
     }))
-    const row = (label: ReturnType<typeof Text>, n: number) => Box({ flexDirection: 'row', width: Math.min(columns, ROW_MAX), children: [
+    const row = (label: ReturnType<typeof Text>, n: number) => Box({ flexDirection: 'row', children: [
       Box({ flexGrow: 1, flexShrink: 1, children: [label] }),
       Box({ width: NUM_W, flexShrink: 0, justifyContent: 'flex-end', children: [Text({ dimColor: true, children: [tokens(n)] })] }),
     ] })
@@ -107,10 +119,12 @@ export function registerContextPane(on: Parameters<Register>[0]): void {
     const measure = (key: string, label: string) => button(key, label, () => measureFull($, columns))
 
     const body = shown
-      ? [Box({ flexDirection: 'row', columnGap: 3, children: [
+      // A drawing as wide as the full grid can leave a narrow pane no room: the legend then goes under it
+      ? [Box({ flexDirection: 'row', flexWrap: Svg ? 'wrap' : 'nowrap', columnGap: 3, rowGap: 1, children: [
           Svg ? Box({ flexShrink: 0, children: [Svg({ ...gridSvg(shown), alt: `contexte : ${shown.percentage} % utilisés` })] })
             : Box({ flexDirection: 'column', flexShrink: 0, children: lines(grid(shown)) }),
-          Box({ flexDirection: 'column', children: lines(legend(shown, v === 'full')) }),
+          // The legend takes what the grid leaves, its whole row once under it: names left, figures right
+          Box({ flexDirection: 'column', flexGrow: 1, children: lines(legend(shown, v === 'full')) }),
         ] })]
       : v === 'full' ? [] : [Text({ dimColor: true, children: ['Pas encore de mesure : elle vient avec la première réponse.'] })]
 

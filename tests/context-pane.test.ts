@@ -33,18 +33,19 @@ const ctx = ($: any) => $.command.run({ command: 'ctx', args: '' })
 
 /** The engine beneath the pane: its panes, and a usage answering each breakdown as `full` says. */
 function stub(on: any, full: () => ContextBreakdown | Error | Promise<ContextBreakdown> = () => BREAKDOWN) {
-  const panes = new Set<string>(), asked: (string | undefined)[] = []
+  const panes = new Set<string>(), asked: (string | undefined)[] = [], widths: number[] = []
   const clock = mock.clock(on, { now: Date.parse('2026-10-06T12:00:00Z') })
   on('ui.panes', () => ({ value: [...panes].map(id => ({ id, title: 'Contexte', isShown: true, isFocused: false, isPlaced: true })) }))
   on('ui.open', ($: unknown, e: { id: string }) => (panes.add(e.id), { value: { isPlaced: true } }))
   on('ui.close', ($: unknown, e: { id: string }) => (panes.delete(e.id), { value: undefined }))
-  on('session.usage', async ($: unknown, e: { breakdown?: string }) => {
+  on('session.usage', async ($: unknown, e: { breakdown?: string; columns?: number }) => {
     asked.push(e.breakdown)
+    if (e.columns !== undefined) widths.push(e.columns)
     const b = e.breakdown === 'full' ? await full() : { ...BREAKDOWN, totalTokens: 79000 }
     if (b instanceof Error) return { deny: b.message }
     return { value: { startedAt: 0, context: { tokens: 80100, window: 200000, percent: 40, breakdown: b }, rateLimits: [] } }
   })
-  return { panes, asked, clock }
+  return { panes, asked, widths, clock }
 }
 
 const textOf = async (ui: any) => JSON.stringify(await ui.drawn())
@@ -57,9 +58,15 @@ test('the grid draws /context\'s glyphs in each row\'s colour', () => {
 test('the legend gives the total, every category and the compaction threshold', () => {
   const text = legend(BREAKDOWN, false).map(l => l.map(s => s.text).join('')).join('\n')
   expect(text).toContain('80.1k / 200.0k tokens (40 %) · estimé')
-  expect(text).toContain('⛁ Messages : 76.9k (38.5 %)')
-  expect(text).toContain('MCP tools : 9.0k (différé)')
+  expect(text).toContain('⛁ Messages76.9k(38.5 %)')
+  expect(text).toContain('MCP tools9.0k')
+  expect(text).not.toContain('différé')
   expect(text).toContain('Autocompact à 167.0k')
+})
+
+test('the legend\'s figures close each category\'s row, the tokens then the share', () => {
+  const messages = legend(BREAKDOWN, false).find(l => l.some(s => s.text === 'Messages'))!
+  expect(messages.filter(s => s.figure).map(s => [s.figure, s.text])).toEqual([['tokens', '76.9k'], ['share', '(38.5 %)']])
 })
 
 test('the details group MCP tools by server, largest first, and leave empty sections out', () => {
@@ -148,6 +155,24 @@ test('on the desktop the squares are drawings, not glyphs', async ($, on) => {
   const drawing = await ui.find({ type: 'Svg' })
   expect(drawing!.props.source).toContain('#b1b9f9')
   expect(text).toContain('79.0k / 200.0k')
+})
+
+test('a narrow desktop pane still asks /context for its full grid; a terminal its own width', async ($, on) => {
+  const { widths } = stub(on)
+  await ctx($)
+  const narrow = { props: { ...PANE.props, bodyColumns: 40 } }
+  await (await $.ui.mount({ ...ON_DESKTOP, ...narrow })).drawn()
+  expect(widths.at(-1)).toBe(80)
+  await (await $.ui.mount({ ...PANE, ...narrow })).drawn()
+  expect(widths.at(-1)).toBe(40)
+})
+
+test('on the desktop a deferred row keeps its square\'s room, empty, so its name lines up', async ($, on) => {
+  stub(on)
+  await ctx($)
+  const text = await textOf(await $.ui.mount(ON_DESKTOP))
+  expect(text).not.toContain('transparent')
+  expect(text.match(/"width":2/g)?.length).toBe(BREAKDOWN.categories.length)
 })
 
 test('on the terminal the squares stay /context\'s glyphs', async ($, on) => {
