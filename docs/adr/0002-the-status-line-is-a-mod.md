@@ -71,6 +71,9 @@ beyond the documentation.
   `reason` `clear` or `resume`.
 - **Right after `/clear`, `$.session.usage()` still reports the old window**
   until the next response. The mod zeroes the gauge itself on `session.end`.
+- **`session.measure` fires only when a main-thread turn ends** (seen on
+  2.1.294), so the gauge also takes the fill from each main `turn.step`'s
+  `usage`: uncached, cache-read and cache-written input together.
 - **`SessionMode` sits right-aligned on the hint line's row**; when the two do
   not fit, the engine pushes it onto a row of its own.
 - **`PromptHint.hint` excludes the mode label** drawn before it:

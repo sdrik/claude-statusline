@@ -43,6 +43,15 @@ const fromUsage = (u: Awaited<ReturnType<EngineInterface['session']['usage']>>):
   tokens: u.context.tokens ?? 0, window: u.context.window, rateLimits: u.rateLimits, costUsd: u.cost?.usd,
 })
 
+/** Takes a new measurement, toasting the thresholds it crosses upward. */
+function remeasure($: EngineInterface, m: Measured): void {
+  measured = m
+  const a = alerts(measured, alerted, cfg)
+  alerted = a.now
+  if (a.text) $.ui.toast(a.text, { timeoutMs: 8000 })
+  $.ui.invalidate('ui.render')
+}
+
 async function home($: EngineInterface): Promise<string | undefined> {
   return (await $.env.get('HOME')) ?? (await $.env.get('USERPROFILE'))
 }
@@ -201,11 +210,7 @@ export const register: Register = (on, options) => {
   })
 
   on('session.measure', async ($, e, next) => {
-    measured = { tokens: e.context.tokens ?? 0, window: e.context.window, rateLimits: e.rateLimits, costUsd: e.cost?.usd }
-    const a = alerts(measured, alerted, cfg)
-    alerted = a.now
-    if (a.text) $.ui.toast(a.text, { timeoutMs: 8000 })
-    $.ui.invalidate('ui.render')
+    remeasure($, { tokens: e.context.tokens ?? 0, window: e.context.window, rateLimits: e.rateLimits, costUsd: e.cost?.usd })
     return next(e)
   })
 
@@ -224,7 +229,12 @@ export const register: Register = (on, options) => {
       $.ui.invalidate('ui.render')
     }
     const result = yield* next(e)
-    if (main && turn && result.usage) turn.out += result.usage.output_tokens
+    if (main && result.usage) {
+      const u = result.usage
+      if (turn) turn.out += u.output_tokens
+      // session.measure fires only at a turn's end: the fill moves with each response
+      remeasure($, { ...measured, tokens: u.input_tokens + u.cache_read_input_tokens + u.cache_creation_input_tokens })
+    }
     return result
   })
 

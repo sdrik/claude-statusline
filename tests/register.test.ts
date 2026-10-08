@@ -183,6 +183,21 @@ test('a turn counts its requests live and leaves its summary beside its duration
   expect(JSON.stringify(texts)).toContain('$0.12')
 })
 
+test('each main request refills the context gauge, before the turn ends', async ($, on) => {
+  const { toasts } = stubSession(on)
+  on('turn.start', ($: unknown, e: { turnId: string }) => ({ turnId: e.turnId }))
+  on('turn.step', async function* ($: unknown, e: { turnId: string; index: number }) {
+    return { turnId: e.turnId, index: e.index, answer: '', toolUses: [], stopReason: 'tool_use',
+      usage: { input_tokens: 400, output_tokens: 50, cache_read_input_tokens: 100000, cache_creation_input_tokens: 2100, model: 'claude-opus-5-5' } }
+  })
+  await start($)
+  await $.turn.start({ turnId: 't1', text: 'lit README.md' })
+  await step($, 't1', 0)
+  const line = await lineOf(await $.ui.mount(SESSION_MODE(200)))
+  expect(line).toContain('↑102.5k/1.0M')
+  expect(toasts).toEqual(['🟧 Contexte ≥ 100.0k'])
+})
+
 test('on the desktop the line is the band above the prompt, its gauges drawings, the footer left to the desktop', async ($, on) => {
   stubSession(on)
   await start($)
